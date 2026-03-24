@@ -2486,6 +2486,29 @@ function _ensureMatrixCols(count) {
     }
 }
 
+/* ── Polygon helpers for angled monitor screens ── */
+// pts = [[x,y],[x,y],[x,y],[x,y]] in original image coords (855×1406), drawn clockwise
+function _polyPath(ctx, sx, sy, pts) {
+    ctx.beginPath();
+    ctx.moveTo(Math.round(pts[0][0] * sx), Math.round(pts[0][1] * sy));
+    for (let i = 1; i < pts.length; i++)
+        ctx.lineTo(Math.round(pts[i][0] * sx), Math.round(pts[i][1] * sy));
+    ctx.closePath();
+}
+function _blackoutPoly(ctx, sx, sy, pts, bgColor) {
+    ctx.globalAlpha = 1.0;
+    ctx.fillStyle = bgColor || '#0a0a14';
+    _polyPath(ctx, sx, sy, pts);
+    ctx.fill();
+}
+// Clip + blackout, returns a save point — caller MUST ctx.restore() after drawing
+function _clipScreen(ctx, sx, sy, pts, bgColor) {
+    ctx.save();
+    _blackoutPoly(ctx, sx, sy, pts, bgColor);
+    _polyPath(ctx, sx, sy, pts);
+    ctx.clip();
+}
+
 /* ── Draw matrix rain inside a rectangular screen area ── */
 function _drawMatrixRain(ctx, f, sx, sy, left, top, right, bottom, alpha, color) {
     const colW = Math.max(Math.round(18 * sx), 2);
@@ -2562,66 +2585,138 @@ function _renderUserCanvas() {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  MATRIX RAIN — cascading green characters on the big monitor
+    //  MONITOR POLYGONS — angled corners matching the perspective art
+    //  Each array is [TL, TR, BR, BL] in original 855×1406 coords
+    // ═══════════════════════════════════════════════════════════════════════
+    const userScreens = {
+        topLeft:    [[62,82],  [398,82],  [393,358], [67,358]],    // Big fighting-game monitor
+        topRight:   [[432,78], [778,92],  [773,228], [435,218]],   // Code/text monitor (angled right)
+        midLeft:    [[65,398], [272,402], [268,540], [68,535]],    // Small game sprite
+        midCenter:  [[288,400],[492,402], [490,540], [290,538]],   // Small terminal
+        midRight:   [[510,392],[788,400], [783,590], [514,582]],   // Portrait (angled right)
+    };
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  TOP-LEFT BIG MONITOR — Matrix rain
     // ═══════════════════════════════════════════════════════════════════════
     {
-        const matrixAlpha = isActive ? 0.22 : (st === 'thinking' ? 0.18 : 0.10);
+        _clipScreen(ctx, sx, sy, userScreens.topLeft, '#050510');
+        const matrixAlpha = isActive ? 0.55 : (st === 'thinking' ? 0.45 : 0.30);
         const matrixColor = isActive ? (st === 'tool' ? '#ff9800' : st === 'agent' ? '#e040fb' : '#00ff41') : '#00ff41';
-        // Big top-left monitor — full matrix rain
-        _drawMatrixRain(ctx, f, sx, sy, 65, 80, 405, 365, matrixAlpha, matrixColor);
-        // Top-right code monitor — subtler, tighter columns
-        _drawMatrixRain(ctx, f + 50, sx, sy, 435, 85, 775, 225, matrixAlpha * 0.7, matrixColor);
-    }
-
-    // ── Subtle screen glow wash behind the matrix (state colored) ──
-    if (isActive) {
-        ctx.globalAlpha = 0.04 + Math.sin(f * 0.1) * 0.015;
-        const glowCol = { thinking:'#ffc107', typing:'#4fc3f7', tool:'#ff9800', agent:'#e040fb' }[st] || '#4fc3f7';
-        ctx.fillStyle = glowCol;
-        ctx.fillRect(Math.round(65 * sx), Math.round(80 * sy), Math.round(340 * sx), Math.round(285 * sy));
-        ctx.fillRect(Math.round(430 * sx), Math.round(80 * sy), Math.round(350 * sx), Math.round(150 * sy));
-        ctx.globalAlpha = 1.0;
+        _drawMatrixRain(ctx, f, sx, sy, 62, 82, 398, 358, matrixAlpha, matrixColor);
+        // State-colored glow wash
+        const glowAlpha = isActive ? (0.08 + Math.sin(f * 0.1) * 0.03) : 0.03;
+        ctx.globalAlpha = glowAlpha;
+        ctx.fillStyle = { thinking:'#ffc107', typing:'#4fc3f7', tool:'#ff9800', agent:'#e040fb', idle:'#003300', done:'#4caf50' }[st] || '#003300';
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore(); ctx.globalAlpha = 1.0;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  MID-ROW MONITORS — scan lines & activity
+    //  TOP-RIGHT CODE MONITOR — Matrix rain (angled)
     // ═══════════════════════════════════════════════════════════════════════
-    // Mid-left small monitor — horizontal scan line
     {
-        const scanSpeed = isActive ? 6 : 3;
-        const scanY = Math.round((400 + (f * scanSpeed) % 140) * sy);
-        ctx.globalAlpha = isActive ? 0.14 : 0.06;
-        ctx.fillStyle = isActive ? '#4fc3f7' : '#00ff41';
-        ctx.fillRect(Math.round(70 * sx), scanY, Math.round(200 * sx), Math.round(3 * sy));
-        ctx.globalAlpha = 1.0;
+        _clipScreen(ctx, sx, sy, userScreens.topRight, '#050510');
+        const matrixAlpha = isActive ? 0.48 : (st === 'thinking' ? 0.38 : 0.25);
+        const matrixColor = isActive ? (st === 'tool' ? '#ff9800' : st === 'agent' ? '#e040fb' : '#00ff41') : '#00ff41';
+        _drawMatrixRain(ctx, f + 50, sx, sy, 432, 78, 778, 228, matrixAlpha, matrixColor);
+        ctx.restore(); ctx.globalAlpha = 1.0;
     }
-    // Mid-center monitor — flickering data blocks
-    if (isActive) {
-        ctx.globalAlpha = 0.12;
-        ctx.fillStyle = st === 'tool' ? '#ff9800' : '#4fc3f7';
-        for (let i = 0; i < 4; i++) {
-            const on = ((f + i * 3) % 8) < 5;
-            if (on) {
-                const bx = Math.round((300 + i * 44) * sx);
-                const by = Math.round((420 + ((f + i * 7) % 3) * 35) * sy);
-                ctx.fillRect(bx, by, Math.round(36 * sx), Math.round(10 * sy));
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  MID-LEFT — Radar sweep
+    // ═══════════════════════════════════════════════════════════════════════
+    {
+        _clipScreen(ctx, sx, sy, userScreens.midLeft, '#060612');
+        const mCx = Math.round(170 * sx), mCy = Math.round(470 * sy);
+        const mR = Math.round(58 * sx);
+        // Radar circles
+        ctx.globalAlpha = 0.18;
+        ctx.strokeStyle = isActive ? '#4fc3f7' : '#1a4a2a';
+        ctx.lineWidth = Math.max(1, Math.round(1 * sx));
+        for (let r = 1; r <= 3; r++) {
+            ctx.beginPath(); ctx.arc(mCx, mCy, mR * r / 3, 0, 6.28); ctx.stroke();
+        }
+        // Sweep line
+        const sweepAngle = f * (isActive ? 0.12 : 0.04);
+        ctx.globalAlpha = 0.5;
+        ctx.strokeStyle = isActive ? (statusColors[st] || '#4fc3f7') : '#00ff41';
+        ctx.lineWidth = Math.max(1, Math.round(2 * sx));
+        ctx.beginPath(); ctx.moveTo(mCx, mCy);
+        ctx.lineTo(mCx + Math.cos(sweepAngle) * mR, mCy + Math.sin(sweepAngle) * mR);
+        ctx.stroke();
+        // Sweep trail
+        ctx.globalAlpha = 0.15;
+        ctx.beginPath(); ctx.moveTo(mCx, mCy);
+        ctx.arc(mCx, mCy, mR, sweepAngle - 0.5, sweepAngle); ctx.closePath();
+        ctx.fillStyle = isActive ? (statusColors[st] || '#4fc3f7') : '#00ff41';
+        ctx.fill();
+        // Blips
+        if (isActive) {
+            ctx.globalAlpha = 0.7; ctx.fillStyle = '#ffffff';
+            const blips = [[0.3,0.5],[-0.4,-0.3],[0.6,-0.2],[-0.2,0.7]];
+            for (const [bx, by] of blips) {
+                if (((f + Math.floor(bx * 10)) % 15) < 10)
+                    ctx.fillRect(Math.round(mCx + bx * mR) - 1, Math.round(mCy + by * mR) - 1,
+                                 Math.round(3 * sx), Math.round(3 * sy));
             }
         }
-        ctx.globalAlpha = 1.0;
-    }
-    // Mid-right portrait monitor — ambient glow pulse
-    {
-        const pAlpha = 0.03 + Math.sin(f * 0.07) * 0.02;
-        ctx.globalAlpha = Math.max(0, pAlpha);
-        ctx.fillStyle = isActive ? (statusColors[st] || '#4fc3f7') : '#2244aa';
-        ctx.fillRect(Math.round(515 * sx), Math.round(400 * sy), Math.round(270 * sx), Math.round(190 * sy));
-        ctx.globalAlpha = 1.0;
+        ctx.restore(); ctx.globalAlpha = 1.0;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  DESK AREA — cyan arrow pulse, coffee steam
+    //  MID-CENTER — Terminal log
     // ═══════════════════════════════════════════════════════════════════════
-    // Cyan arrow on right — subtle glow pulse
+    {
+        _clipScreen(ctx, sx, sy, userScreens.midCenter, '#060612');
+        const lineH = Math.max(Math.round(14 * sy), 2);
+        const termColor = isActive ? (st === 'tool' ? '#ff9800' : '#00ff41') : '#1a6a2a';
+        for (let i = 0; i < 12; i++) {
+            const lineY = Math.round(405 * sy) + i * lineH - ((f * 2) % lineH);
+            ctx.globalAlpha = isActive ? (0.4 + (i % 3) * 0.15) : 0.2;
+            ctx.fillStyle = termColor;
+            const lineW = Math.round((80 + ((i * 37 + f) % 100)) * sx);
+            ctx.fillRect(Math.round(298 * sx), lineY, Math.min(lineW, Math.round(185 * sx)), Math.round(4 * sy));
+        }
+        if (f % 8 < 5) {
+            ctx.globalAlpha = 0.7; ctx.fillStyle = '#ffffff';
+            ctx.fillRect(Math.round(298 * sx), Math.round(525 * sy), Math.round(8 * sx), Math.round(10 * sy));
+        }
+        ctx.restore(); ctx.globalAlpha = 1.0;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  MID-RIGHT — Waveform visualizer (angled)
+    // ═══════════════════════════════════════════════════════════════════════
+    {
+        _clipScreen(ctx, sx, sy, userScreens.midRight, '#060612');
+        const waveCenterY = Math.round(490 * sy);
+        const waveLeft = Math.round(522 * sx);
+        const waveW = Math.round(252 * sx);
+        const barW = Math.max(Math.round(6 * sx), 2);
+        const gap = Math.max(Math.round(2 * sx), 1);
+        const bars = Math.floor(waveW / (barW + gap));
+        const barCol = isActive ? (statusColors[st] || '#4fc3f7') : '#1a3a4a';
+        for (let i = 0; i < bars; i++) {
+            const amp = isActive
+                ? (Math.sin(f * 0.15 + i * 0.4) * 0.5 + Math.sin(f * 0.08 + i * 0.7) * 0.3 + 0.3)
+                : (Math.sin(f * 0.03 + i * 0.3) * 0.15 + 0.15);
+            const barH = Math.round(amp * 75 * sy);
+            const bx = waveLeft + i * (barW + gap);
+            ctx.globalAlpha = isActive ? 0.6 : 0.25;
+            ctx.fillStyle = barCol;
+            ctx.fillRect(bx, waveCenterY - barH / 2, barW, barH);
+            ctx.globalAlpha = isActive ? 0.8 : 0.3;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(bx, waveCenterY - barH / 2, barW, Math.max(Math.round(2 * sy), 1));
+            ctx.fillRect(bx, waveCenterY + barH / 2 - Math.max(Math.round(2 * sy), 1), barW, Math.max(Math.round(2 * sy), 1));
+        }
+        ctx.restore(); ctx.globalAlpha = 1.0;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  DESK AREA — cyan arrow pulse, coffee steam, breathing, server LEDs
+    // ═══════════════════════════════════════════════════════════════════════
     {
         const arrAlpha = 0.06 + Math.sin(f * 0.12) * 0.04;
         ctx.globalAlpha = Math.max(0, arrAlpha);
@@ -2629,40 +2724,27 @@ function _renderUserCanvas() {
         ctx.fillRect(Math.round(770 * sx), Math.round(520 * sy), Math.round(60 * sx), Math.round(70 * sy));
         ctx.globalAlpha = 1.0;
     }
-
-    // Coffee steam
     if (f % 20 < 14) {
-        ctx.globalAlpha = 0.18;
-        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.18; ctx.fillStyle = '#ffffff';
         for (let s = 0; s < 3; s++) {
             const sway = Math.sin(f * 0.15 + s * 2.0) * 6;
             const steamY = Math.round((700 - (f % 12 + s * 4) * 6) * sy);
-            if (steamY > Math.round(650 * sy)) {
+            if (steamY > Math.round(650 * sy))
                 ctx.fillRect(Math.round((145 + sway) * sx), steamY, Math.round(7 * sx), Math.round(4 * sy));
-            }
         }
         ctx.globalAlpha = 1.0;
     }
-
-    // ── Character breathing ──
     if (st === 'idle') {
-        const breathAlpha = 0.02 + Math.sin(f * 0.06) * 0.01;
-        ctx.globalAlpha = Math.max(0, breathAlpha);
+        ctx.globalAlpha = Math.max(0, 0.02 + Math.sin(f * 0.06) * 0.01);
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(Math.round(250 * sx), Math.round(700 * sy), Math.round(350 * sx), Math.round(300 * sy));
         ctx.globalAlpha = 1.0;
     }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  SERVER RACK — blinking LEDs
-    // ═══════════════════════════════════════════════════════════════════════
     for (let i = 0; i < 6; i++) {
-        const ledActive = ((f + i * 4) % 14) < (isActive ? 10 : 4);
-        if (ledActive) {
+        if (((f + i * 4) % 14) < (isActive ? 10 : 4)) {
             ctx.fillStyle = isActive ? (statusColors[st] || '#4caf50') : '#4caf50';
-            const lx = Math.round((80 + i * 24) * sx);
-            const ly = Math.round((1140 + (i % 2) * 30) * sy);
-            ctx.fillRect(lx, ly, Math.round(6 * sx), Math.round(6 * sy));
+            ctx.fillRect(Math.round((80 + i * 24) * sx), Math.round((1140 + (i % 2) * 30) * sy),
+                         Math.round(6 * sx), Math.round(6 * sy));
         }
     }
 }
@@ -2717,252 +2799,272 @@ function _renderAICanvas() {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  BRAIN GLOW — pulsing radial glow over the brain icon
+    //  MONITOR POLYGONS — angled corners matching the perspective art
+    //  Each array is [TL, TR, BR, BL] in original 855×1406 coords
+    // ═══════════════════════════════════════════════════════════════════════
+    const aiScreens = {
+        topLeftDoc:   [[48,72],  [295,80],  [290,278], [52,270]],    // Doc/tablet (slight angle)
+        topCenterNotes:[[318,72],[522,80],  [518,210], [322,205]],   // Notes panel
+        topRightBoard: [[548,58],[815,68],  [810,305], [545,295]],   // Concept board (angled right)
+        midLeftCode:   [[52,308],[325,318], [320,515], [55,505]],    // Code/graph + brain area
+        mainMonitor:   [[298,428],[808,438],[805,705], [300,695]],   // Big concept map
+    };
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  TOP-LEFT DOC MONITOR — scrolling document
     // ═══════════════════════════════════════════════════════════════════════
     {
-        const brainCx = Math.round(200 * sx), brainCy = Math.round(485 * sy);
-        const brainR = Math.round(55 * sx);
-        // Base gentle pulse even when idle
-        const brainAlpha = isActive
-            ? (st === 'thinking' ? 0.30 + Math.sin(f * 0.2) * 0.12
-               : st === 'agent' ? 0.25 + Math.sin(f * 0.15) * 0.10
-               : 0.15 + Math.sin(f * 0.1) * 0.06)
-            : 0.05 + Math.sin(f * 0.04) * 0.02;
-        const brainCol = st === 'thinking' ? '#ffc107' : st === 'agent' ? '#e040fb' : st === 'tool' ? '#ff9800' : '#ff4488';
+        _clipScreen(ctx, sx, sy, aiScreens.topLeftDoc, '#050510');
+        const lineH = Math.max(Math.round(16 * sy), 2);
+        const scrollOff = (f * 2) % lineH;
+        const docColor = isActive ? '#8ab4f8' : '#4a6a8a';
+        for (let i = 0; i < 16; i++) {
+            const lineY = Math.round(80 * sy) + i * lineH - scrollOff;
+            ctx.globalAlpha = isActive ? 0.45 : 0.25;
+            ctx.fillStyle = docColor;
+            const lineW = Math.round((60 + ((i * 47 + 13) % 160)) * sx);
+            ctx.fillRect(Math.round(60 * sx), lineY, Math.min(lineW, Math.round(240 * sx)), Math.round(4 * sy));
+            if (i % 5 === 0) {
+                ctx.globalAlpha = isActive ? 0.6 : 0.3;
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(Math.round(60 * sx), lineY, Math.round(120 * sx), Math.round(5 * sy));
+            }
+        }
+        const readY = Math.round((100 + (f * 3) % 170) * sy);
+        ctx.globalAlpha = 0.15;
+        ctx.fillStyle = isActive ? (statusColors[st] || '#4fc3f7') : '#334466';
+        ctx.fillRect(0, readY, W, lineH);
+        ctx.restore(); ctx.globalAlpha = 1.0;
+    }
 
-        // Outer glow halo
-        const grad = ctx.createRadialGradient(brainCx, brainCy, 0, brainCx, brainCy, brainR * 2);
+    // ═══════════════════════════════════════════════════════════════════════
+    //  TOP-CENTER NOTES — bullet points
+    // ═══════════════════════════════════════════════════════════════════════
+    {
+        _clipScreen(ctx, sx, sy, aiScreens.topCenterNotes, '#050510');
+        const noteColor = isActive ? '#4fc3f7' : '#2a4a5a';
+        for (let i = 0; i < 6; i++) {
+            ctx.globalAlpha = isActive ? (0.35 + Math.sin(f * 0.1 + i) * 0.1) : 0.2;
+            ctx.fillStyle = isActive ? (statusColors[st] || noteColor) : '#3a5a6a';
+            ctx.beginPath();
+            ctx.arc(Math.round(335 * sx), Math.round((90 + i * 22) * sy), Math.round(3 * sx), 0, 6.28);
+            ctx.fill();
+            ctx.fillStyle = noteColor;
+            ctx.fillRect(Math.round(345 * sx), Math.round((87 + i * 22) * sy),
+                         Math.round((40 + (i * 31 % 120)) * sx), Math.round(4 * sy));
+        }
+        ctx.restore(); ctx.globalAlpha = 1.0;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  TOP-RIGHT CONCEPT BOARD — neural network
+    // ═══════════════════════════════════════════════════════════════════════
+    {
+        _clipScreen(ctx, sx, sy, aiScreens.topRightBoard, '#060612');
+        const nodes = [
+            { x: 610, y: 110 }, { x: 720, y: 95 },  { x: 790, y: 140 },
+            { x: 630, y: 190 }, { x: 730, y: 210 }, { x: 680, y: 270 },
+            { x: 580, y: 250 }, { x: 790, y: 250 },
+        ];
+        const connections = [[0,1],[1,2],[0,3],[1,4],[2,4],[3,4],[3,5],[4,5],[5,6],[4,7],[2,7],[0,6]];
+        ctx.strokeStyle = isActive ? stateCol : '#1a3a2a';
+        ctx.lineWidth = Math.max(1, Math.round(1.5 * sx));
+        for (const [a, b] of connections) {
+            ctx.globalAlpha = (isActive ? 0.22 : 0.12) + Math.sin(f * 0.06 + a + b) * 0.06;
+            ctx.beginPath();
+            ctx.moveTo(Math.round(nodes[a].x * sx), Math.round(nodes[a].y * sy));
+            ctx.lineTo(Math.round(nodes[b].x * sx), Math.round(nodes[b].y * sy));
+            ctx.stroke();
+        }
+        for (let i = 0; i < nodes.length; i++) {
+            const pulseOn = isActive ? ((f + i * 4) % 12) < 9 : ((f + i * 6) % 20) < 6;
+            ctx.globalAlpha = (isActive ? 0.5 : 0.2) * (0.7 + Math.sin(f * 0.15 + i * 1.2) * 0.3);
+            ctx.fillStyle = stateCol;
+            ctx.beginPath();
+            ctx.arc(Math.round(nodes[i].x * sx), Math.round(nodes[i].y * sy), Math.round((pulseOn ? 12 : 8) * sx), 0, 6.28);
+            ctx.fill();
+            ctx.fillStyle = '#ffffff'; ctx.globalAlpha *= 0.6;
+            ctx.beginPath();
+            ctx.arc(Math.round(nodes[i].x * sx), Math.round(nodes[i].y * sy), Math.round(4 * sx), 0, 6.28);
+            ctx.fill();
+        }
+        if (isActive) {
+            ctx.globalAlpha = 0.7;
+            for (let p = 0; p < 3; p++) {
+                const pair = connections[(f + p * 4) % connections.length];
+                const t = ((f * 2 + p * 30) % 30) / 30;
+                const px = nodes[pair[0]].x + (nodes[pair[1]].x - nodes[pair[0]].x) * t;
+                const py = nodes[pair[0]].y + (nodes[pair[1]].y - nodes[pair[0]].y) * t;
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(Math.round(px * sx), Math.round(py * sy), Math.round(4 * sx), 0, 6.28);
+                ctx.fill();
+            }
+        }
+        ctx.restore(); ctx.globalAlpha = 1.0;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  MID-LEFT — Brain with neural sparks
+    // ═══════════════════════════════════════════════════════════════════════
+    {
+        _clipScreen(ctx, sx, sy, aiScreens.midLeftCode, '#050510');
+        const brainCx = Math.round(190 * sx), brainCy = Math.round(415 * sy);
+        const brainR = Math.round(55 * sx);
+        const brainAlpha = isActive
+            ? (st === 'thinking' ? 0.55 + Math.sin(f * 0.2) * 0.15
+               : st === 'agent' ? 0.45 + Math.sin(f * 0.15) * 0.12
+               : 0.35 + Math.sin(f * 0.1) * 0.08)
+            : 0.18 + Math.sin(f * 0.04) * 0.05;
+        const brainCol = st === 'thinking' ? '#ffc107' : st === 'agent' ? '#e040fb' : st === 'tool' ? '#ff9800' : '#ff4488';
+        // Outer glow
+        const grad = ctx.createRadialGradient(brainCx, brainCy, 0, brainCx, brainCy, brainR * 2.5);
         grad.addColorStop(0, brainCol);
-        grad.addColorStop(0.4, brainCol + '66');
+        grad.addColorStop(0.3, brainCol + '88');
+        grad.addColorStop(0.6, brainCol + '33');
         grad.addColorStop(1, brainCol + '00');
         ctx.globalAlpha = brainAlpha;
         ctx.fillStyle = grad;
-        ctx.fillRect(brainCx - brainR * 2, brainCy - brainR * 2, brainR * 4, brainR * 4);
-
-        // Inner bright core
-        ctx.globalAlpha = brainAlpha * 0.6;
+        ctx.fillRect(brainCx - brainR * 2.5, brainCy - brainR * 2.5, brainR * 5, brainR * 5);
+        // Brain hemispheres
+        ctx.globalAlpha = brainAlpha * 0.8;
+        ctx.fillStyle = brainCol;
+        ctx.beginPath();
+        ctx.arc(brainCx - Math.round(12 * sx), brainCy - Math.round(5 * sy), Math.round(28 * sx), 0, 6.28);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(brainCx + Math.round(12 * sx), brainCy - Math.round(5 * sy), Math.round(28 * sx), 0, 6.28);
+        ctx.fill();
+        ctx.fillRect(Math.round(brainCx - 6 * sx), brainCy + Math.round(18 * sy), Math.round(12 * sx), Math.round(15 * sy));
+        // Core
+        ctx.globalAlpha = brainAlpha * 0.5;
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
-        ctx.arc(brainCx, brainCy, Math.round(18 * sx), 0, 6.28);
+        ctx.arc(brainCx, brainCy - Math.round(4 * sy), Math.round(14 * sx), 0, 6.28);
         ctx.fill();
-        ctx.globalAlpha = 1.0;
-
-        // Neural "spark" particles radiating from brain when active
+        // Neural folds
+        ctx.globalAlpha = brainAlpha * 0.6;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = Math.max(1, Math.round(1.5 * sx));
+        for (let i = 0; i < 3; i++) {
+            const yOff = (-15 + i * 12) * sy;
+            ctx.beginPath();
+            ctx.moveTo(brainCx - Math.round(20 * sx), brainCy + Math.round(yOff));
+            ctx.quadraticCurveTo(brainCx, brainCy + Math.round(yOff) - Math.round(8 * sy),
+                                 brainCx + Math.round(20 * sx), brainCy + Math.round(yOff));
+            ctx.stroke();
+        }
+        // Sparks
         if (isActive) {
-            ctx.globalAlpha = 0.35;
-            const sparkCount = st === 'thinking' ? 6 : st === 'agent' ? 5 : 3;
+            const sparkCount = st === 'thinking' ? 8 : st === 'agent' ? 6 : 4;
             for (let i = 0; i < sparkCount; i++) {
                 const angle = (f * 0.08 + i * (6.28 / sparkCount)) % 6.28;
-                const dist = brainR * (0.8 + Math.sin(f * 0.12 + i) * 0.4);
+                const dist = brainR * (0.9 + Math.sin(f * 0.12 + i) * 0.5);
                 const spX = brainCx + Math.cos(angle) * dist;
                 const spY = brainCy + Math.sin(angle) * dist;
-                ctx.fillStyle = brainCol;
-                ctx.fillRect(Math.round(spX) - 1, Math.round(spY) - 1, Math.round(4 * sx), Math.round(4 * sy));
-            }
-            ctx.globalAlpha = 1.0;
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  TOP-RIGHT CONCEPT BOARD — neural network node pulses
-    // ═══════════════════════════════════════════════════════════════════════
-    {
-        // Node positions on the concept board (rough locations of brain/node icons)
-        const nodes = [
-            { x: 620, y: 130 },  // top-left node
-            { x: 720, y: 100 },  // top-center
-            { x: 780, y: 160 },  // top-right
-            { x: 650, y: 220 },  // mid-left
-            { x: 740, y: 240 },  // mid-right
-            { x: 690, y: 290 },  // bottom-center
-        ];
-        // Draw connection lines between nodes (neural network)
-        if (isActive) {
-            ctx.globalAlpha = 0.10 + Math.sin(f * 0.08) * 0.04;
-            ctx.strokeStyle = stateCol;
-            ctx.lineWidth = Math.max(1, Math.round(2 * sx));
-            const connections = [[0,1],[1,2],[0,3],[1,4],[2,4],[3,4],[3,5],[4,5]];
-            for (const [a, b] of connections) {
-                ctx.beginPath();
-                ctx.moveTo(Math.round(nodes[a].x * sx), Math.round(nodes[a].y * sy));
-                ctx.lineTo(Math.round(nodes[b].x * sx), Math.round(nodes[b].y * sy));
-                ctx.stroke();
-            }
-            ctx.globalAlpha = 1.0;
-        }
-        // Pulse each node with staggered timing
-        for (let i = 0; i < nodes.length; i++) {
-            const pulseOn = isActive
-                ? ((f + i * 4) % 12) < 8
-                : ((f + i * 6) % 20) < 4;
-            if (pulseOn) {
-                const nodeAlpha = isActive ? 0.30 : 0.10;
-                ctx.globalAlpha = nodeAlpha * (0.7 + Math.sin(f * 0.15 + i * 1.2) * 0.3);
-                ctx.fillStyle = stateCol;
-                ctx.beginPath();
-                ctx.arc(Math.round(nodes[i].x * sx), Math.round(nodes[i].y * sy), Math.round(10 * sx), 0, 6.28);
-                ctx.fill();
-                // Bright center dot
+                ctx.globalAlpha = 0.5;
                 ctx.fillStyle = '#ffffff';
-                ctx.beginPath();
-                ctx.arc(Math.round(nodes[i].x * sx), Math.round(nodes[i].y * sy), Math.round(3 * sx), 0, 6.28);
-                ctx.fill();
+                ctx.fillRect(Math.round(spX) - 1, Math.round(spY) - 1, Math.round(4 * sx), Math.round(4 * sy));
+                ctx.globalAlpha = 0.2;
+                ctx.strokeStyle = brainCol;
+                ctx.beginPath(); ctx.moveTo(brainCx, brainCy); ctx.lineTo(Math.round(spX), Math.round(spY)); ctx.stroke();
             }
         }
-        ctx.globalAlpha = 1.0;
-
-        // Data pulse traveling along a connection when active
-        if (isActive) {
-            ctx.globalAlpha = 0.5;
-            const pairs = [[0,1],[1,2],[0,3],[1,4],[2,4],[3,4],[3,5],[4,5]];
-            const pair = pairs[f % pairs.length];
-            const t = (f % 10) / 10;
-            const px = nodes[pair[0]].x + (nodes[pair[1]].x - nodes[pair[0]].x) * t;
-            const py = nodes[pair[0]].y + (nodes[pair[1]].y - nodes[pair[0]].y) * t;
-            ctx.fillStyle = '#ffffff';
-            ctx.beginPath();
-            ctx.arc(Math.round(px * sx), Math.round(py * sy), Math.round(4 * sx), 0, 6.28);
-            ctx.fill();
-            ctx.globalAlpha = 1.0;
-        }
+        ctx.restore(); ctx.globalAlpha = 1.0;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  GEAR ICON — rotation indicator on concept map monitor
-    // ═══════════════════════════════════════════════════════════════════════
-    if (isActive) {
-        const gearCx = Math.round(420 * sx), gearCy = Math.round(555 * sy);
-        const gearR = Math.round(22 * sx);
-        // Rotating gear teeth
-        ctx.globalAlpha = st === 'tool' ? 0.35 : 0.18;
-        const teeth = 8;
-        const rotSpeed = st === 'tool' ? 0.15 : st === 'agent' ? 0.10 : 0.05;
-        for (let i = 0; i < teeth; i++) {
-            const angle = f * rotSpeed + i * (6.28 / teeth);
-            const tx = gearCx + Math.cos(angle) * gearR;
-            const ty = gearCy + Math.sin(angle) * gearR;
-            ctx.fillStyle = st === 'tool' ? '#ff9800' : stateCol;
-            ctx.fillRect(Math.round(tx) - Math.round(3 * sx), Math.round(ty) - Math.round(3 * sy),
-                         Math.round(6 * sx), Math.round(6 * sy));
-        }
-        // Gear center glow
-        ctx.fillStyle = st === 'tool' ? '#ff9800' : stateCol;
-        ctx.beginPath();
-        ctx.arc(gearCx, gearCy, Math.round(8 * sx), 0, 6.28);
-        ctx.fill();
-        ctx.globalAlpha = 1.0;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  LIGHTBULB — idea glow on concept map
+    //  MAIN CONCEPT MAP — gear, lightbulb, text output, spinner
     // ═══════════════════════════════════════════════════════════════════════
     {
-        const bulbCx = Math.round(560 * sx), bulbCy = Math.round(548 * sy);
+        _clipScreen(ctx, sx, sy, aiScreens.mainMonitor, '#060612');
+
+        // Gear icon
+        const gearCx = Math.round(370 * sx), gearCy = Math.round(555 * sy);
+        const gearR = Math.round(28 * sx);
+        const rotSpeed = isActive ? (st === 'tool' ? 0.18 : 0.08) : 0.02;
+        ctx.globalAlpha = isActive ? 0.5 : 0.2;
+        for (let i = 0; i < 8; i++) {
+            const angle = f * rotSpeed + i * (6.28 / 8);
+            ctx.fillStyle = st === 'tool' ? '#ff9800' : (isActive ? stateCol : '#2a4a3a');
+            const tx1 = gearCx + Math.cos(angle - 0.15) * gearR * 0.6;
+            const ty1 = gearCy + Math.sin(angle - 0.15) * gearR * 0.6;
+            const tx2 = gearCx + Math.cos(angle) * gearR;
+            const ty2 = gearCy + Math.sin(angle) * gearR;
+            const tx3 = gearCx + Math.cos(angle + 0.15) * gearR * 0.6;
+            const ty3 = gearCy + Math.sin(angle + 0.15) * gearR * 0.6;
+            ctx.beginPath(); ctx.moveTo(tx1, ty1); ctx.lineTo(tx2, ty2); ctx.lineTo(tx3, ty3); ctx.fill();
+        }
+        ctx.beginPath(); ctx.arc(gearCx, gearCy, Math.round(16 * sx), 0, 6.28); ctx.fill();
+        ctx.globalAlpha = 1.0; ctx.fillStyle = '#0a0a14';
+        ctx.beginPath(); ctx.arc(gearCx, gearCy, Math.round(6 * sx), 0, 6.28); ctx.fill();
+
+        // Lightbulb
+        const bulbCx = Math.round(500 * sx), bulbCy = Math.round(530 * sy);
         const bulbOn = st === 'done' || st === 'typing' || st === 'agent';
         const bulbThink = st === 'thinking';
-        if (bulbOn || bulbThink) {
-            // Lightbulb radial glow
-            const bulbAlpha = bulbOn ? (0.25 + Math.sin(f * 0.1) * 0.08) : (0.10 + Math.sin(f * 0.25) * 0.08);
-            const bulbCol = bulbOn ? '#ffeb3b' : '#ffc107';
-            const bGrad = ctx.createRadialGradient(bulbCx, bulbCy, 0, bulbCx, bulbCy, Math.round(35 * sx));
-            bGrad.addColorStop(0, bulbCol);
-            bGrad.addColorStop(0.5, bulbCol + '44');
-            bGrad.addColorStop(1, bulbCol + '00');
-            ctx.globalAlpha = bulbAlpha;
-            ctx.fillStyle = bGrad;
-            ctx.fillRect(bulbCx - Math.round(35 * sx), bulbCy - Math.round(35 * sy),
-                         Math.round(70 * sx), Math.round(70 * sy));
-            // Bright filament center
-            ctx.globalAlpha = bulbAlpha * 0.8;
-            ctx.fillStyle = '#ffffff';
-            ctx.beginPath();
-            ctx.arc(bulbCx, bulbCy, Math.round(6 * sx), 0, 6.28);
-            ctx.fill();
-            ctx.globalAlpha = 1.0;
-        }
-        // Flicker off/on when thinking (idea forming)
-        if (bulbThink && (f % 6 < 2)) {
-            ctx.globalAlpha = 0.08;
-            ctx.fillStyle = '#000000';
-            ctx.beginPath();
-            ctx.arc(bulbCx, bulbCy, Math.round(14 * sx), 0, 6.28);
-            ctx.fill();
-            ctx.globalAlpha = 1.0;
-        }
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  TOP-LEFT MONITORS — document scan & data viz
-    // ═══════════════════════════════════════════════════════════════════════
-    // Doc monitor — scrolling read line
-    {
-        const docScanY = Math.round((90 + (f * 4) % 180) * sy);
-        ctx.globalAlpha = isActive ? 0.12 : 0.04;
-        ctx.fillStyle = isActive ? '#4fc3f7' : '#446688';
-        ctx.fillRect(Math.round(60 * sx), docScanY, Math.round(240 * sx), Math.round(3 * sy));
-        ctx.globalAlpha = 1.0;
-    }
-    // Notes monitor — flickering highlight lines
-    if (isActive) {
-        ctx.globalAlpha = 0.10;
-        for (let i = 0; i < 3; i++) {
-            const on = ((f + i * 5) % 10) < 6;
-            if (on) {
-                ctx.fillStyle = st === 'agent' ? '#e040fb' : '#4fc3f7';
-                ctx.fillRect(Math.round(330 * sx), Math.round((90 + i * 38) * sy),
-                             Math.round(180 * sx), Math.round(8 * sy));
+        {
+            const bulbAlpha = bulbOn ? (0.55 + Math.sin(f * 0.1) * 0.15) : bulbThink ? (0.25 + Math.sin(f * 0.25) * 0.15) : 0.12;
+            const bulbCol = bulbOn ? '#ffeb3b' : bulbThink ? '#ffc107' : '#3a3a20';
+            const bGrad = ctx.createRadialGradient(bulbCx, bulbCy, 0, bulbCx, bulbCy, Math.round(45 * sx));
+            bGrad.addColorStop(0, bulbCol); bGrad.addColorStop(0.4, bulbCol + '66'); bGrad.addColorStop(1, bulbCol + '00');
+            ctx.globalAlpha = bulbAlpha; ctx.fillStyle = bGrad;
+            ctx.fillRect(bulbCx - Math.round(45 * sx), bulbCy - Math.round(45 * sy), Math.round(90 * sx), Math.round(90 * sy));
+            ctx.globalAlpha = bulbAlpha * 0.9; ctx.fillStyle = bulbCol;
+            ctx.beginPath(); ctx.arc(bulbCx, bulbCy - Math.round(6 * sy), Math.round(14 * sx), 0, 6.28); ctx.fill();
+            ctx.fillRect(bulbCx - Math.round(8 * sx), bulbCy + Math.round(6 * sy), Math.round(16 * sx), Math.round(10 * sy));
+            if (bulbOn || bulbThink) {
+                ctx.globalAlpha = (bulbThink && (f % 6 < 2)) ? 0.1 : 0.7;
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath(); ctx.arc(bulbCx, bulbCy - Math.round(6 * sy), Math.round(5 * sx), 0, 6.28); ctx.fill();
             }
         }
-        ctx.globalAlpha = 1.0;
-    }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  MAIN CONCEPT MAP MONITOR — scrolling output + thinking spinner
-    // ═══════════════════════════════════════════════════════════════════════
-    // Subtle state-colored glow wash
-    if (isActive) {
-        ctx.globalAlpha = 0.04 + Math.sin(f * 0.12) * 0.015;
-        ctx.fillStyle = { thinking:'#ffc107', typing:'#4fc3f7', tool:'#ff9800', agent:'#e040fb', done:'#4caf50' }[st] || '#4fc3f7';
-        ctx.fillRect(Math.round(300 * sx), Math.round(440 * sy), Math.round(505 * sx), Math.round(265 * sy));
-        ctx.globalAlpha = 1.0;
-    }
-    // Scrolling content line
-    if (st === 'typing' || st === 'tool' || st === 'agent') {
-        ctx.globalAlpha = 0.15;
-        ctx.fillStyle = st === 'tool' ? '#ff9800' : st === 'agent' ? '#e040fb' : '#4fc3f7';
-        const scrollY = Math.round((460 + (f * 6) % 230) * sy);
-        ctx.fillRect(Math.round(310 * sx), scrollY, Math.round(480 * sx), Math.round(4 * sy));
-        ctx.globalAlpha = 1.0;
-    }
-    // Thinking spinner
-    if (st === 'thinking') {
-        ctx.globalAlpha = 0.25;
-        ctx.fillStyle = '#ffc107';
-        const dots = 5;
-        for (let i = 0; i < dots; i++) {
-            const angle = (f * 0.12 + i * (6.28 / dots)) % 6.28;
-            const cx = Math.round((550 + Math.cos(angle) * 60) * sx);
-            const cy = Math.round((580 + Math.sin(angle) * 40) * sy);
-            const size = i === (f % dots) ? 10 : 5;
-            ctx.fillRect(cx, cy, Math.round(size * sx), Math.round(size * sy));
+        // Scrolling text
+        {
+            const lineH = Math.max(Math.round(14 * sy), 2);
+            const txtColor = isActive ? (st === 'tool' ? '#ff9800' : st === 'agent' ? '#e040fb' : '#4fc3f7') : '#1a3a4a';
+            const scrollOff = (f * 3) % lineH;
+            for (let i = 0; i < 18; i++) {
+                const lineY = Math.round(440 * sy) + i * lineH - scrollOff;
+                ctx.globalAlpha = isActive ? 0.4 : 0.15;
+                ctx.fillStyle = txtColor;
+                ctx.fillRect(Math.round(580 * sx), lineY,
+                             Math.min(Math.round((40 + ((i * 53 + 7) % 160)) * sx), Math.round(210 * sx)),
+                             Math.round(4 * sy));
+            }
+            if (f % 8 < 5) {
+                ctx.globalAlpha = 0.6; ctx.fillStyle = '#ffffff';
+                ctx.fillRect(Math.round(580 * sx), Math.round(690 * sy), Math.round(8 * sx), Math.round(10 * sy));
+            }
         }
-        ctx.globalAlpha = 1.0;
+
+        // Thinking spinner
+        if (st === 'thinking') {
+            ctx.globalAlpha = 0.45; ctx.fillStyle = '#ffc107';
+            for (let i = 0; i < 5; i++) {
+                const angle = (f * 0.15 + i * (6.28 / 5)) % 6.28;
+                ctx.fillRect(Math.round((500 + Math.cos(angle) * 55) * sx),
+                             Math.round((610 + Math.sin(angle) * 35) * sy),
+                             Math.round((i === (f % 5) ? 10 : 5) * sx), Math.round((i === (f % 5) ? 10 : 5) * sy));
+            }
+        }
+        ctx.restore(); ctx.globalAlpha = 1.0;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    //  COLOR PALETTE — cycling glow on the palette dots
+    //  COLOR PALETTE — cycling dots
     // ═══════════════════════════════════════════════════════════════════════
-    if (isActive) {
-        const palColors = ['#ff4444','#ff9800','#ffeb3b','#4caf50','#4fc3f7','#e040fb','#ffffff'];
+    {
+        const palColors = ['#ff4444','#ff9800','#ffeb3b','#4caf50','#4fc3f7','#e040fb','#ffffff','#ff6ec7'];
         for (let i = 0; i < palColors.length; i++) {
-            const on = ((f + i * 2) % 10) < 6;
+            const on = isActive ? (((f + i * 2) % 10) < 7) : (((f + i * 3) % 16) < 5);
             if (on) {
-                ctx.globalAlpha = 0.20 + Math.sin(f * 0.12 + i) * 0.08;
+                ctx.globalAlpha = isActive ? (0.40 + Math.sin(f * 0.12 + i) * 0.15) : 0.15;
                 ctx.fillStyle = palColors[i];
-                const px = Math.round((728 + (i % 4) * 22) * sx);
-                const py = Math.round((618 + Math.floor(i / 4) * 22) * sy);
                 ctx.beginPath();
-                ctx.arc(px, py, Math.round(6 * sx), 0, 6.28);
+                ctx.arc(Math.round((728 + (i % 4) * 22) * sx), Math.round((618 + Math.floor(i / 4) * 22) * sy),
+                        Math.round(7 * sx), 0, 6.28);
                 ctx.fill();
             }
         }
