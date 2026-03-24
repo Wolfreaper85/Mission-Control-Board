@@ -1,0 +1,64 @@
+{
+    "name": "mission-control",
+    "version": "1.0.0",
+    "description": "Visual Mission Control dashboard — monitor agents, manage goals as a Kanban board, and track activity in real-time.",
+    "author": "Wolfreaper85",
+    "icon": "\ud83c\udfaf",
+    "priority": 40,
+    "capabilities": {
+        "tools": ["tools/mission.py"],
+        "web": true,
+        "routes": [
+            {
+                "method": "GET",
+                "path": "goals",
+                "handler": "routes/dashboard.py:get_goals"
+            },
+            {
+                "method": "POST",
+                "path": "goals/update",
+                "handler": "routes/dashboard.py:update_goal"
+            },
+            {
+                "method": "POST",
+                "path": "goals/create",
+                "handler": "routes/dashboard.py:create_goal"
+            },
+            {
+                "method": "POST",
+                "path": "goals/delete",
+                "handler": "routes/dashboard.py:delete_goal"
+            },
+            {
+                "method": "GET",
+                "path": "agents",
+                "handler": "routes/dashboard.py:get_agents"
+            },
+            {
+                "method": "GET",
+                "path": "stats",
+                "handler": "routes/dashboard.py:get_stats"
+            },
+            {
+                "method": "GET",
+                "path": "memory/scopes",
+                "handler": "routes/dashboard.py:get_memory_scopes"
+            },
+            {
+                "method": "GET",
+                "path": "schedule/check-stamps",
+                "handler": "routes/dashboard.py:check_schedule_stamps"
+            },
+            {
+                "method": "GET",
+                "path": "plugin-info",
+                "handler": "routes/dashboard.py:get_plugin_info"
+            },
+            {
+                "method": "POST",
+                "path": "launch",
+                "handler": "routes/dashboard.py:launch_plugin"
+            }
+        ]
+    }
+}
