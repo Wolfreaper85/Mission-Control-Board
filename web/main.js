@@ -101,11 +101,8 @@ let _pixelState = 'idle'; // idle, thinking, typing, tool, agent, done
 let _pixelIdleTimer = null;
 let _pixelFrame = 0;
 let _pixelAnimTimer = null;
-let _pxImgUser = null;  // loaded Image for user scene
-let _pxImgAI = null;    // loaded Image for AI scene
-let _pxImgLoaded = false;
-let _pxUserMask = null;  // { mask: Canvas, clean: Canvas } — chroma key data
-let _pxAIMask = null;
+let _offUser = null, _offAI = null; // offscreen canvases for crisp pixel art
+const _GW = 160, _GH = 260;        // game resolution (scaled up to display)
 
 // ─── Launcher init ───────────────────────────────────────────────────────────
 
@@ -2418,65 +2415,8 @@ function _updatePixelFromEvent(evt) {
 /* ══════════════════════════════════════════════════════════════════════════════
    Chroma Key — scan image for green pixels, build mask + clean canvases
    ══════════════════════════════════════════════════════════════════════════════ */
-function _buildChromaMask(img) {
-    const w = img.naturalWidth, h = img.naturalHeight;
-    // Read pixels from image
-    const tmp = document.createElement('canvas');
-    tmp.width = w; tmp.height = h;
-    const tCtx = tmp.getContext('2d');
-    tCtx.drawImage(img, 0, 0);
-    const srcData = tCtx.getImageData(0, 0, w, h);
-    const px = srcData.data;
-
-    // Build mask canvas (white where green, transparent elsewhere)
-    const mask = document.createElement('canvas');
-    mask.width = w; mask.height = h;
-    const mCtx = mask.getContext('2d');
-    const mData = mCtx.createImageData(w, h);
-    const mp = mData.data;
-
-    // Build clean canvas (green replaced with dark screen color)
-    const cleanData = tCtx.getImageData(0, 0, w, h);
-    const cp = cleanData.data;
-
-    for (let i = 0; i < px.length; i += 4) {
-        const r = px[i], g = px[i + 1], b = px[i + 2];
-        // Detect green screen: high green, low red and blue
-        const isGreen = g > 160 && r < 120 && b < 120;
-        if (isGreen) {
-            mp[i] = 255; mp[i + 1] = 255; mp[i + 2] = 255; mp[i + 3] = 255;
-            cp[i] = 8; cp[i + 1] = 8; cp[i + 2] = 16; cp[i + 3] = 255;
-        }
-        // else: mask stays transparent (0,0,0,0), clean keeps original pixel
-    }
-
-    mCtx.putImageData(mData, 0, 0);
-
-    const clean = document.createElement('canvas');
-    clean.width = w; clean.height = h;
-    const cCtx = clean.getContext('2d');
-    cCtx.putImageData(cleanData, 0, 0);
-
-    return { mask, clean };
-}
-
 function _initPixelArt() {
     _pixelFrame = 0;
-    if (!_pxImgLoaded) {
-        _pxImgLoaded = true;
-        _pxImgUser = new Image();
-        _pxImgUser.src = '/plugin-web/mission-control/Coder-Agent.png';
-        _pxImgAI = new Image();
-        _pxImgAI.src = '/plugin-web/mission-control/AI-Workstation.png';
-        _pxImgUser.onload = () => {
-            _pxUserMask = _buildChromaMask(_pxImgUser);
-            _renderPixelScenes();
-        };
-        _pxImgAI.onload = () => {
-            _pxAIMask = _buildChromaMask(_pxImgAI);
-            _renderPixelScenes();
-        };
-    }
     _renderPixelScenes();
     if (_pixelAnimTimer) clearInterval(_pixelAnimTimer);
     _pixelAnimTimer = setInterval(() => { _pixelFrame++; _renderPixelScenes(); }, 200);
@@ -2486,7 +2426,7 @@ function _stopPixelArt() {
 }
 
 /* ── Drawing helpers ── */
-function _rect(ctx, x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); }
+function _r(c, x, y, w, h, col) { c.fillStyle = col; c.fillRect(x, y, w, h); }
 
 function _syncCanvasSize(cv) {
     const rect = cv.getBoundingClientRect();
@@ -2496,589 +2436,635 @@ function _syncCanvasSize(cv) {
 }
 function _renderPixelScenes() { _renderUserCanvas(); _renderAICanvas(); }
 
+function _stCol(st) {
+    return { idle:'#4caf50', thinking:'#ffc107', typing:'#4fc3f7', tool:'#ff9800', agent:'#e040fb', done:'#4caf50' }[st] || '#4caf50';
+}
+function _stLabel(st) {
+    return { idle:'IDLE', thinking:'THINKING', typing:'CODING', tool:'RUNNING', agent:'AGENT', done:'DONE' }[st] || 'IDLE';
+}
+
 /* ══════════════════════════════════════════════════════════════════════════════
-   Shared animation helpers
+   Procedural 16-Bit Pixel Art Engine
+   Draws entire scenes on small offscreen canvases (160×260 game pixels),
+   then blits to display with nearest-neighbor scaling for crisp retro look.
    ══════════════════════════════════════════════════════════════════════════════ */
-let _matrixCols = null;
-function _ensureMatrixCols(count) {
-    if (_matrixCols && _matrixCols.length >= count) return;
-    _matrixCols = [];
-    for (let i = 0; i < count; i++) {
-        _matrixCols.push({
-            y: Math.floor(Math.random() * 40),
-            speed: 1 + Math.floor(Math.random() * 3),
-            chars: [],
-        });
-        for (let j = 0; j < 30; j++)
-            _matrixCols[i].chars.push(String.fromCharCode(0x30A0 + Math.floor(Math.random() * 96)));
-    }
-}
-
-/* Draw matrix rain filling the entire canvas (mask will clip it to screens) */
-function _drawMatrixRainFull(ctx, f, W, H, alpha, color) {
-    const colW = Math.max(Math.round(W / 30), 4);
-    const charH = Math.max(Math.round(H / 40), 4);
-    const cols = Math.ceil(W / colW);
-    _ensureMatrixCols(cols);
-    for (let c = 0; c < cols; c++) {
-        const col = _matrixCols[c % _matrixCols.length];
-        const x = c * colW;
-        const headY = ((f * col.speed * charH + col.y * charH) % (H + charH * 14)) - charH * 6;
-        const trailLen = 8 + (c % 5);
-        for (let t = 0; t < trailLen; t++) {
-            const cy = headY - t * charH;
-            if (cy < -charH || cy > H) continue;
-            const fade = t === 0 ? 1.0 : Math.max(0.1, 1.0 - t / trailLen);
-            ctx.globalAlpha = alpha * fade;
-            ctx.fillStyle = t === 0 ? '#ffffff' : color;
-            ctx.font = `${charH}px monospace`;
-            ctx.fillText(col.chars[(t + Math.floor(f / 3)) % col.chars.length], x, cy);
-        }
-    }
-    ctx.globalAlpha = 1.0;
-}
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   USER SCENE — Coder Agent with chroma key compositing
+   CODER AGENT — Procedural 16-bit pixel art scene
    ══════════════════════════════════════════════════════════════════════════════ */
 
 function _renderUserCanvas() {
     const cv = document.getElementById('mc-px-user-cv');
     if (!cv) return;
     _syncCanvasSize(cv);
-    const ctx = cv.getContext('2d');
+    if (!_offUser) { _offUser = document.createElement('canvas'); _offUser.width = _GW; _offUser.height = _GH; }
+    const c = _offUser.getContext('2d');
     const f = _pixelFrame, st = _pixelState;
-    const W = cv.width, H = cv.height;
-    ctx.clearRect(0, 0, W, H);
+    const act = st === 'typing' || st === 'tool' || st === 'agent';
+    const sc = _stCol(st);
+    c.clearRect(0, 0, _GW, _GH);
 
-    if (!_pxUserMask) {
-        // Images not loaded yet — dark fallback
-        _rect(ctx, 0, 0, W, H, '#080810');
-        return;
+    // ── Room background ──
+    _r(c, 0, 0, 160, 260, '#0c0e18');
+    _r(c, 0, 12, 160, 108, '#161830');
+    for (let i = 0; i < 9; i++) _r(c, 17, 18 + i * 12, 126, 1, '#1c1e34');
+    _r(c, 16, 12, 1, 108, '#1e2038');
+    _r(c, 143, 12, 1, 108, '#1e2038');
+
+    // ── Server rack LEFT ──
+    _r(c, 1, 36, 14, 208, '#1a1c26');
+    _r(c, 0, 36, 1, 208, '#262a36');
+    _r(c, 15, 36, 1, 208, '#262a36');
+    for (let i = 0; i < 11; i++) {
+        const y = 40 + i * 18;
+        _r(c, 3, y, 10, 14, '#242630');
+        _r(c, 3, y, 10, 1, '#363a48');
+        _r(c, 4, y + 3, 8, 8, '#1a1c26');
+        if ((f + i * 3) % 14 < (act ? 9 : 3)) _r(c, 5, y + 5, 2, 2, act ? sc : '#4caf50');
+        if ((f + i * 5 + 7) % 16 < (act ? 8 : 2)) _r(c, 9, y + 5, 2, 2, '#4caf50');
     }
 
-    const isActive = st === 'typing' || st === 'tool' || st === 'agent';
-    const statusColors = { idle:'#4caf50', thinking:'#ffc107', typing:'#4caf50', tool:'#ff9800', agent:'#e040fb', done:'#4caf50' };
-    const stateCol = statusColors[st] || '#4caf50';
+    // ── Server rack RIGHT ──
+    _r(c, 145, 36, 14, 208, '#1a1c26');
+    _r(c, 144, 36, 1, 208, '#262a36');
+    _r(c, 159, 36, 1, 208, '#262a36');
+    for (let i = 0; i < 11; i++) {
+        const y = 40 + i * 18;
+        _r(c, 147, y, 10, 14, '#242630');
+        _r(c, 147, y, 10, 1, '#363a48');
+        _r(c, 148, y + 3, 8, 8, '#1a1c26');
+        if ((f + i * 4 + 2) % 15 < (act ? 9 : 3)) _r(c, 149, y + 5, 2, 2, act ? sc : '#4caf50');
+        if ((f + i * 6 + 5) % 13 < (act ? 7 : 2)) _r(c, 153, y + 5, 2, 2, '#4caf50');
+    }
 
-    // ══════════════════════════════════════════════════════════════════
-    //  STEP 1: Draw screen animations on blank canvas
-    //  (mask will cut these to the green-screen monitor shapes)
-    // ══════════════════════════════════════════════════════════════════
-    const sx = W / 629, sy = H / 1024;
+    // ── Monitor shelf ──
+    _r(c, 18, 26, 124, 3, '#363a48');
+    _r(c, 18, 26, 124, 1, '#444860');
 
-    // Dark screen base
-    _rect(ctx, 0, 0, W, H, '#0a0c18');
+    // ── Left monitor ──
+    _r(c, 22, 30, 50, 38, '#16181e');
+    _r(c, 22, 30, 50, 1, '#2a2e38');
+    _r(c, 22, 30, 1, 38, '#2a2e38');
+    _r(c, 24, 32, 46, 34, '#060a14');
+    // Monitor stand
+    _r(c, 44, 68, 8, 4, '#2a2e38');
+    _r(c, 40, 72, 16, 2, '#363a48');
 
-    // ── CODE EDITOR — syntax-highlighted scrolling code (fills most of canvas) ──
+    // ── Right monitor ──
+    _r(c, 88, 30, 50, 38, '#16181e');
+    _r(c, 88, 30, 50, 1, '#2a2e38');
+    _r(c, 88, 30, 1, 38, '#2a2e38');
+    _r(c, 90, 32, 46, 34, '#060a14');
+    _r(c, 110, 68, 8, 4, '#2a2e38');
+    _r(c, 106, 72, 16, 2, '#363a48');
+
+    // ── Side monitor (on articulating arm) ──
+    _r(c, 141, 64, 2, 16, '#363a48');
+    _r(c, 139, 62, 6, 2, '#2a2e38');
+    _r(c, 110, 76, 38, 30, '#16181e');
+    _r(c, 110, 76, 38, 1, '#2a2e38');
+    _r(c, 110, 76, 1, 30, '#2a2e38');
+    _r(c, 112, 78, 34, 26, '#060a14');
+
+    // ── Screen content: Left monitor — Code editor ──
     {
-        const lineH = Math.max(Math.round(11 * sy), 3);
-        const scrollOff = (f * (isActive ? 3 : 1)) % lineH;
-        // Syntax color palette (IDE dark theme)
-        const syntaxColors = ['#569cd6','#ce9178','#dcdcaa','#c586c0','#9cdcfe','#4ec9b0','#d4d4d4','#6a9955','#b5cea8','#d7ba7d'];
-        for (let i = 0; i < 80; i++) {
-            const lineY = i * lineH - scrollOff;
-            if (lineY < -lineH || lineY > H) continue;
-            // Indent level (0-3)
-            const indent = ((i * 7 + 3) % 4);
-            const indentPx = Math.round(indent * 16 * sx);
-            // Multiple "tokens" per line
-            const seed = (i * 31 + 7);
-            let xPos = indentPx + Math.round(8 * sx);
-            const numTokens = 2 + (seed % 4);
-            for (let t = 0; t < numTokens; t++) {
-                const tokenW = Math.round((18 + ((seed + t * 53) % 55)) * sx);
-                const colorIdx = (seed + t * 3) % syntaxColors.length;
-                ctx.globalAlpha = isActive ? 0.7 : 0.35;
-                ctx.fillStyle = syntaxColors[colorIdx];
-                ctx.fillRect(xPos, lineY, tokenW, Math.round(4 * sy));
-                xPos += tokenW + Math.round((6 + (t * 7) % 8) * sx);
-                if (xPos > W * 0.9) break;
+        c.save(); c.beginPath(); c.rect(24, 32, 46, 34); c.clip();
+        const spd = act ? 3 : 1;
+        const lH = 3, scroll = (f * spd) % lH;
+        const syn = ['#569cd6','#ce9178','#dcdcaa','#c586c0','#9cdcfe','#4ec9b0','#d4d4d4'];
+        for (let i = 0; i < 14; i++) {
+            const ly = 32 + i * lH - scroll;
+            if (ly < 28 || ly > 66) continue;
+            const s = i * 31 + 7;
+            c.globalAlpha = act ? 0.3 : 0.15;
+            _r(c, 25, ly, 3, 2, '#636369');
+            c.globalAlpha = act ? 0.75 : 0.35;
+            let xp = 29 + (s % 3) * 3;
+            for (let t = 0; t < 2 + (s % 3); t++) {
+                const tw = 4 + ((s + t * 13) % 12);
+                _r(c, xp, ly, tw, 2, syn[(s + t) % syn.length]);
+                xp += tw + 2;
+                if (xp > 66) break;
             }
-            // Line numbers on left edge
-            ctx.globalAlpha = isActive ? 0.25 : 0.12;
-            ctx.fillStyle = '#636369';
-            ctx.fillRect(Math.round(2 * sx), lineY, Math.round(4 * sx), Math.round(4 * sy));
         }
-        // Active line highlight (current editing line)
-        if (isActive) {
-            const activeLine = Math.round((H * 0.4 + Math.sin(f * 0.05) * H * 0.1));
-            ctx.globalAlpha = 0.06;
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, activeLine, W, lineH);
-            ctx.globalAlpha = 1.0;
-        }
-        // Blinking cursor
-        if (f % 8 < 5) {
-            ctx.globalAlpha = isActive ? 0.8 : 0.3;
-            ctx.fillStyle = '#aeafad';
-            const cursorY = Math.round((H * 0.4 + Math.sin(f * 0.05) * H * 0.1));
-            ctx.fillRect(Math.round(100 * sx), cursorY, Math.round(2 * sx), lineH);
-            ctx.globalAlpha = 1.0;
-        }
+        if (act && f % 6 < 4) { c.globalAlpha = 0.9; _r(c, 36, 44, 1, 3, '#aeafad'); }
+        c.globalAlpha = 1; c.restore();
     }
 
-    // ── TERMINAL OUTPUT — green-on-black log (lower portion of canvas) ──
+    // ── Screen content: Right monitor — Terminal ──
     {
-        const termTop = H * 0.55;
-        const termLineH = Math.max(Math.round(10 * sy), 3);
-        const termScroll = (f * (isActive ? 2 : 1)) % termLineH;
-        for (let i = 0; i < 30; i++) {
-            const lineY = termTop + i * termLineH - termScroll;
-            if (lineY < termTop - termLineH || lineY > H) continue;
-            const seed = (i * 43 + f * 2 + 11);
-            // Prompt symbol
-            ctx.globalAlpha = isActive ? 0.5 : 0.2;
-            ctx.fillStyle = '#4ec9b0';
-            ctx.fillRect(Math.round(6 * sx), lineY, Math.round(8 * sx), Math.round(3 * sy));
-            // Command/output text
-            const isError = (seed % 20) === 0;
-            const isWarning = (seed % 12) === 0;
-            ctx.fillStyle = isError ? '#f44747' : isWarning ? '#cca700' : '#4af626';
-            const lineW = Math.round((30 + (seed % 120)) * sx);
-            ctx.fillRect(Math.round(18 * sx), lineY, lineW, Math.round(3 * sy));
+        c.save(); c.beginPath(); c.rect(90, 32, 46, 34); c.clip();
+        _r(c, 90, 32, 46, 34, '#080e08');
+        const spd = act ? 2 : 1, lH = 3, scroll = (f * spd) % lH;
+        for (let i = 0; i < 14; i++) {
+            const ly = 32 + i * lH - scroll;
+            if (ly < 28 || ly > 66) continue;
+            const s = i * 43 + 11;
+            c.globalAlpha = act ? 0.6 : 0.25;
+            _r(c, 92, ly, 3, 2, '#4ec9b0');
+            const isErr = (s % 15) === 0;
+            _r(c, 96, ly, 6 + (s % 30), 2, isErr ? '#f44747' : '#4af626');
         }
-        ctx.globalAlpha = 1.0;
+        // Cursor
+        if (act && f % 4 < 3) { c.globalAlpha = 0.8; _r(c, 92, 32 + 30, 4, 2, '#4af626'); }
+        c.globalAlpha = 1; c.restore();
     }
 
-    // ── DEBUG GRAPHS — bar chart (right side of canvas) ──
+    // ── Screen content: Side monitor — Debug graphs ──
     {
-        const graphLeft = W * 0.6;
-        const graphTop = H * 0.55;
-        const graphH = H * 0.35;
-        const barCount = 12;
-        const barW = Math.max(Math.round((W * 0.35) / barCount * 0.7), 2);
-        const barGap = Math.max(Math.round((W * 0.35) / barCount * 0.3), 1);
-        for (let i = 0; i < barCount; i++) {
-            const amp = isActive
+        c.save(); c.beginPath(); c.rect(112, 78, 34, 26); c.clip();
+        for (let i = 0; i < 8; i++) {
+            const amp = act
                 ? 0.3 + Math.sin(f * 0.12 + i * 0.8) * 0.3 + Math.cos(f * 0.07 + i * 0.5) * 0.2
                 : 0.1 + Math.sin(f * 0.03 + i * 0.6) * 0.08;
-            const barH = Math.round(Math.max(0.05, amp) * graphH);
-            const bx = graphLeft + i * (barW + barGap);
-            const by = graphTop + graphH - barH;
-            // Bar color based on value
+            const bh = Math.max(2, Math.round(Math.max(0.05, amp) * 18));
+            const bx = 114 + i * 4, by = 100 - bh;
             const hue = amp > 0.6 ? '#f44747' : amp > 0.3 ? '#cca700' : '#4ec9b0';
-            ctx.globalAlpha = isActive ? 0.6 : 0.25;
-            ctx.fillStyle = hue;
-            ctx.fillRect(bx, by, barW, barH);
-            // Bright tip
-            ctx.globalAlpha = isActive ? 0.8 : 0.3;
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(bx, by, barW, Math.max(1, Math.round(2 * sy)));
+            c.globalAlpha = act ? 0.7 : 0.3;
+            _r(c, bx, by, 3, bh, hue);
+            c.globalAlpha = act ? 0.9 : 0.4;
+            _r(c, bx, by, 3, 1, '#fff');
         }
-        // Axis line
-        ctx.globalAlpha = isActive ? 0.2 : 0.08;
-        ctx.fillStyle = '#444466';
-        ctx.fillRect(graphLeft, graphTop + graphH, W * 0.35, Math.max(1, Math.round(1 * sy)));
-        ctx.globalAlpha = 1.0;
+        c.globalAlpha = 0.15; _r(c, 114, 100, 30, 1, '#555'); c.globalAlpha = 1;
+        c.restore();
     }
 
-    // ── WAVEFORM — audio-style oscilloscope (bottom strip) ──
+    // ── CRT scan lines on monitors ──
     {
-        const waveY = H * 0.92;
-        ctx.globalAlpha = isActive ? 0.5 : 0.15;
-        ctx.strokeStyle = isActive ? stateCol : '#334455';
-        ctx.lineWidth = Math.max(1, Math.round(1.5 * sx));
-        ctx.beginPath();
-        for (let x = 0; x < W; x += Math.max(2, Math.round(3 * sx))) {
-            const val = isActive
-                ? Math.sin(x * 0.03 + f * 0.2) * 12 + Math.sin(x * 0.07 + f * 0.15) * 8
-                : Math.sin(x * 0.02 + f * 0.05) * 4;
-            const py = waveY + val * sy;
-            if (x === 0) ctx.moveTo(x, py); else ctx.lineTo(x, py);
+        const scanF = (f * 3) % 40;
+        c.globalAlpha = 0.07;
+        _r(c, 24, 32 + (scanF % 34), 46, 1, '#fff');
+        _r(c, 90, 32 + (scanF % 34), 46, 1, '#fff');
+        _r(c, 112, 78 + (scanF % 26), 34, 1, '#fff');
+        c.globalAlpha = 1;
+    }
+
+    // ── Monitor glow on wall ──
+    if (act) {
+        c.globalAlpha = 0.04;
+        _r(c, 20, 16, 56, 12, sc);
+        _r(c, 86, 16, 56, 12, sc);
+        c.globalAlpha = 1;
+    }
+
+    // ── Cyan arrow indicator (right wall) ──
+    {
+        const glow = 0.5 + Math.sin(f * 0.15) * 0.2;
+        c.globalAlpha = glow;
+        _r(c, 148, 88, 6, 8, '#00e5ff');
+        _r(c, 146, 90, 3, 4, '#00e5ff');
+        _r(c, 154, 90, 3, 4, '#00e5ff');
+        c.globalAlpha = glow * 0.3;
+        _r(c, 144, 86, 14, 12, '#00e5ff');
+        c.globalAlpha = 1;
+    }
+
+    // ── Desk ──
+    _r(c, 17, 112, 126, 2, '#8a7650');
+    _r(c, 17, 112, 126, 1, '#9a8660');
+    _r(c, 17, 114, 126, 18, '#5a4830');
+    _r(c, 17, 131, 126, 1, '#4a3c26');
+    _r(c, 30, 122, 8, 2, '#363a48');
+    _r(c, 122, 122, 8, 2, '#363a48');
+    // Desk legs
+    _r(c, 20, 132, 3, 36, '#4a3c26');
+    _r(c, 137, 132, 3, 36, '#4a3c26');
+
+    // ── Keyboard left ──
+    _r(c, 32, 113, 22, 5, '#26262e');
+    _r(c, 32, 113, 22, 1, '#3a3a44');
+    for (let kx = 0; kx < 5; kx++) for (let ky = 0; ky < 2; ky++)
+        _r(c, 34 + kx * 4, 114 + ky * 2, 3, 1, '#404050');
+
+    // ── Keyboard right (main) ──
+    _r(c, 64, 113, 30, 6, '#26262e');
+    _r(c, 64, 113, 30, 1, '#3a3a44');
+    for (let kx = 0; kx < 6; kx++) for (let ky = 0; ky < 2; ky++)
+        _r(c, 66 + kx * 4, 114 + ky * 2, 3, 1, '#404050');
+
+    // ── Mouse ──
+    _r(c, 98, 114, 4, 5, '#2a2a34');
+    _r(c, 99, 114, 2, 2, '#3a3a44');
+
+    // ── Phone/tablet ──
+    _r(c, 106, 113, 8, 5, '#1a1a24');
+    _r(c, 107, 114, 6, 3, '#2a3a50');
+
+    // ── Joystick ──
+    _r(c, 118, 113, 4, 3, '#2a2a34');
+    _r(c, 119, 110, 2, 4, '#3a3a4a');
+    _r(c, 118, 109, 4, 2, '#e04040');
+
+    // ── Character (Coder — viewed from behind) ──
+    {
+        const cx = 80;
+        const breathe = st === 'idle' ? Math.round(Math.sin(f * 0.08) * 0.6) : 0;
+        const by = 98 + breathe;
+
+        // ── Hair (back of head) ──
+        _r(c, cx - 6, by, 12, 5, '#5c3a1e');
+        _r(c, cx - 7, by + 2, 14, 4, '#4a2e16');
+        // Ears
+        _r(c, cx - 8, by + 3, 2, 3, '#c49460');
+        _r(c, cx + 6, by + 3, 2, 3, '#c49460');
+        // Back of head / neck
+        _r(c, cx - 5, by + 6, 10, 3, '#c49460');
+        _r(c, cx - 3, by + 9, 6, 3, '#b08450');
+
+        // ── Shoulders ──
+        _r(c, cx - 18, by + 12, 36, 5, '#22222e');
+        _r(c, cx - 18, by + 12, 36, 1, '#2e2e3c');
+
+        // ── Upper back (hoodie) ──
+        _r(c, cx - 16, by + 17, 32, 22, '#2a2a38');
+        // Shoulder shading
+        _r(c, cx - 16, by + 17, 4, 8, '#222230');
+        _r(c, cx + 12, by + 17, 4, 8, '#222230');
+        // Center seam
+        _r(c, cx, by + 17, 1, 22, '#222230');
+        // Logo on back
+        _r(c, cx - 6, by + 23, 12, 5, '#4a4a5c');
+        _r(c, cx - 5, by + 24, 10, 3, '#2a2a38');
+        // Hem
+        _r(c, cx - 16, by + 38, 32, 1, '#1e1e2a');
+
+        // ── Lower body ──
+        _r(c, cx - 13, by + 39, 26, 14, '#1e1e2a');
+        _r(c, cx - 11, by + 53, 22, 6, '#1a1a26');
+
+        // ── Arms ──
+        const typing = st === 'typing';
+        const thinking = st === 'thinking';
+        const done = st === 'done';
+        const lWob = typing ? [0, -1, 0, 1][f % 4] : 0;
+        const rWob = typing ? [1, 0, -1, 0][f % 4] : 0;
+
+        if (done) {
+            // Victory pose — arms up
+            _r(c, cx - 22, by + 6, 5, 12, '#22222e');
+            _r(c, cx - 23, by + 2, 4, 6, '#22222e');
+            _r(c, cx - 23, by, 3, 3, '#c49460');
+            _r(c, cx + 17, by + 6, 5, 12, '#22222e');
+            _r(c, cx + 18, by + 2, 4, 6, '#22222e');
+            _r(c, cx + 20, by, 3, 3, '#c49460');
+        } else if (thinking) {
+            // Left arm at desk
+            _r(c, cx - 19, by + 14, 4, 14, '#22222e');
+            _r(c, cx - 21, by + 12, 4, 4, '#2a2a38');
+            _r(c, cx - 22, by + 12, 3, 2, '#c49460');
+            // Right arm to head (thinking)
+            const thinkF = [0, 1, 2, 1][f % 4];
+            _r(c, cx + 15, by + 14, 4, 8 - thinkF * 2, '#22222e');
+            _r(c, cx + 14, by + 6 + (2 - thinkF), 5, 6, '#2a2a38');
+            _r(c, cx + 13, by + 4 + (2 - thinkF), 3, 3, '#c49460');
+        } else {
+            // Normal arms reaching to desk/keyboard
+            // Left arm
+            _r(c, cx - 19, by + 14, 4, 12 + lWob, '#22222e');
+            _r(c, cx - 22, by + 13, 5, 3, '#2a2a38');
+            _r(c, cx - 24, by + 12 + lWob, 3, 2, '#c49460');
+            // Right arm
+            _r(c, cx + 15, by + 14, 4, 12 + rWob, '#22222e');
+            _r(c, cx + 17, by + 13, 5, 3, '#2a2a38');
+            _r(c, cx + 21, by + 12 + rWob, 3, 2, '#c49460');
         }
-        ctx.stroke();
-        ctx.globalAlpha = 1.0;
     }
 
-    // ── Subtle CRT scan line ──
-    {
-        const scanY = (f * 4) % H;
-        ctx.globalAlpha = 0.06;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, scanY, W, Math.max(2, Math.round(H / 350)));
-        ctx.globalAlpha = 1.0;
-    }
+    // ── Chair ──
+    _r(c, 56, 150, 4, 18, '#1e1e2a');
+    _r(c, 100, 150, 4, 18, '#1e1e2a');
+    _r(c, 56, 150, 4, 1, '#2e2e40');
+    _r(c, 100, 150, 4, 1, '#2e2e40');
+    _r(c, 58, 164, 44, 5, '#242434');
+    _r(c, 58, 164, 44, 1, '#2e2e40');
+    _r(c, 76, 169, 8, 10, '#1e1e2a');
+    _r(c, 76, 169, 8, 1, '#2e2e40');
+    // Wheel base (star shape)
+    _r(c, 64, 178, 32, 2, '#2a2c36');
+    _r(c, 78, 176, 4, 6, '#2a2c36');
+    // Wheels
+    _r(c, 64, 180, 4, 3, '#1a1c24');
+    _r(c, 92, 180, 4, 3, '#1a1c24');
+    _r(c, 78, 182, 4, 2, '#1a1c24');
 
-    // ══════════════════════════════════════════════════════════════════
-    //  STEP 2: Mask — cut animations to only the green screen areas
-    // ══════════════════════════════════════════════════════════════════
-    ctx.globalCompositeOperation = 'destination-in';
-    ctx.drawImage(_pxUserMask.mask, 0, 0, W, H);
-
-    // ══════════════════════════════════════════════════════════════════
-    //  STEP 3: Draw clean image behind (non-screen areas)
-    // ══════════════════════════════════════════════════════════════════
-    ctx.globalCompositeOperation = 'destination-over';
-    ctx.drawImage(_pxUserMask.clean, 0, 0, W, H);
-
-    // Reset composite mode for overlay effects on top of everything
-    ctx.globalCompositeOperation = 'source-over';
-
-    // ══════════════════════════════════════════════════════════════════
-    //  STEP 4: Non-screen overlays (LEDs, steam, etc.) drawn on top
-    // ══════════════════════════════════════════════════════════════════
-
-    // Status LED
-    if (f % 10 < 7) {
-        ctx.fillStyle = stateCol;
-        ctx.beginPath();
-        ctx.arc(Math.round(390 * sx), Math.round(35 * sy), Math.round(8 * sx), 0, 6.28);
-        ctx.fill();
-        ctx.fillStyle = stateCol + '33';
-        ctx.beginPath();
-        ctx.arc(Math.round(390 * sx), Math.round(35 * sy), Math.round(14 * sx), 0, 6.28);
-        ctx.fill();
-    }
-
-    // Coffee steam
+    // ── Coffee mug ──
+    _r(c, 20, 126, 5, 7, '#8b6e4e');
+    _r(c, 24, 128, 3, 3, '#8b6e4e');
+    _r(c, 25, 129, 2, 1, '#0c0e18');
+    _r(c, 20, 126, 5, 1, '#aaa');
+    _r(c, 21, 126, 3, 1, '#6b4422');
     if (f % 20 < 14) {
-        ctx.globalAlpha = 0.20;
-        ctx.fillStyle = '#ffffff';
-        for (let s = 0; s < 3; s++) {
-            const sway = Math.sin(f * 0.15 + s * 2.0) * 4;
-            const steamY = Math.round((505 - (f % 12 + s * 4) * 4) * sy);
-            if (steamY > Math.round(475 * sy))
-                ctx.fillRect(Math.round((108 + sway) * sx), steamY, Math.round(5 * sx), Math.round(3 * sy));
-        }
-        ctx.globalAlpha = 1.0;
+        c.globalAlpha = 0.3;
+        _r(c, 21 + (f % 3), 123 - (f % 4), 2, 2, '#fff');
+        _r(c, 23 - (f % 2), 121 - (f % 3), 1, 2, '#fff');
+        c.globalAlpha = 1;
     }
 
-    // Cyan arrow glow
-    {
-        ctx.globalAlpha = Math.max(0, 0.06 + Math.sin(f * 0.12) * 0.04);
-        ctx.fillStyle = '#00e5ff';
-        ctx.fillRect(Math.round(565 * sx), Math.round(375 * sy), Math.round(45 * sx), Math.round(50 * sy));
-        ctx.globalAlpha = 1.0;
+    // ── Floor ──
+    _r(c, 0, 184, 160, 76, '#0a0c14');
+    for (let i = 0; i < 7; i++) _r(c, 0, 190 + i * 10, 160, 1, '#12141e');
+
+    // ── Floor cables ──
+    _r(c, 22, 194, 36, 1, '#14141e');
+    _r(c, 58, 194, 1, 28, '#14141e');
+    _r(c, 58, 222, 28, 1, '#14141e');
+    _r(c, 100, 198, 36, 1, '#14141e');
+    _r(c, 100, 198, 1, 22, '#14141e');
+    _r(c, 32, 210, 1, 18, '#14141e');
+    _r(c, 32, 228, 18, 1, '#14141e');
+    _r(c, 112, 204, 28, 1, '#14141e');
+    _r(c, 118, 218, 1, 20, '#14141e');
+    _r(c, 44, 242, 56, 1, '#14141e');
+
+    // ── Title bar (drawn last, on top) ──
+    _r(c, 0, 0, 160, 12, '#0a0c14');
+    _r(c, 0, 11, 160, 1, '#1a1c2a');
+    c.font = 'bold 7px monospace';
+    c.fillStyle = '#8a8aaa';
+    c.fillText('CODER AGENT', 4, 8);
+    // Status dot
+    _r(c, 96, 3, 5, 5, sc);
+    if (act) { c.globalAlpha = 0.4; _r(c, 95, 2, 7, 7, sc); c.globalAlpha = 1; }
+    c.font = '6px monospace';
+    c.fillStyle = '#6a6a8a';
+    c.fillText('[' + _stLabel(st) + ']', 104, 8);
+
+    // ── Ambient glow effects ──
+    if (act) {
+        c.globalAlpha = 0.05;
+        _r(c, 20, 132, 120, 8, sc);
+        c.globalAlpha = 0.025;
+        _r(c, 30, 186, 100, 16, sc);
+        c.globalAlpha = 1;
+    }
+    if (st === 'done') {
+        c.globalAlpha = 0.06 + Math.sin(f * 0.2) * 0.03;
+        _r(c, 0, 0, _GW, _GH, '#4caf50');
+        c.globalAlpha = 1;
     }
 
-    // Character breathing
-    if (st === 'idle') {
-        ctx.globalAlpha = Math.max(0, 0.02 + Math.sin(f * 0.06) * 0.01);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(Math.round(180 * sx), Math.round(510 * sy), Math.round(260 * sx), Math.round(220 * sy));
-        ctx.globalAlpha = 1.0;
-    }
-
-    // Server rack LEDs
-    for (let i = 0; i < 6; i++) {
-        if (((f + i * 4) % 14) < (isActive ? 10 : 4)) {
-            ctx.fillStyle = isActive ? stateCol : '#4caf50';
-            ctx.fillRect(Math.round((60 + i * 18) * sx), Math.round((830 + (i % 2) * 22) * sy),
-                         Math.round(4 * sx), Math.round(4 * sy));
-        }
-    }
+    // ── Blit to display ──
+    const dc = cv.getContext('2d');
+    dc.imageSmoothingEnabled = false;
+    dc.clearRect(0, 0, cv.width, cv.height);
+    dc.drawImage(_offUser, 0, 0, cv.width, cv.height);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   AI SCENE — AI Workstation with chroma key compositing
+   AI WORKSTATION — Procedural 16-bit pixel art scene
    ══════════════════════════════════════════════════════════════════════════════ */
+
 function _renderAICanvas() {
     const cv = document.getElementById('mc-px-ai-cv');
     if (!cv) return;
     _syncCanvasSize(cv);
-    const ctx = cv.getContext('2d');
+    if (!_offAI) { _offAI = document.createElement('canvas'); _offAI.width = _GW; _offAI.height = _GH; }
+    const c = _offAI.getContext('2d');
     const f = _pixelFrame, st = _pixelState;
-    const W = cv.width, H = cv.height;
-    ctx.clearRect(0, 0, W, H);
+    const act = st !== 'idle';
+    const isHot = st === 'typing' || st === 'tool' || st === 'agent';
+    const sc = _stCol(st);
+    c.clearRect(0, 0, _GW, _GH);
 
-    if (!_pxAIMask) {
-        _rect(ctx, 0, 0, W, H, '#080810');
-        return;
+    // ── Room background ──
+    _r(c, 0, 0, 160, 260, '#0a0c16');
+    _r(c, 0, 12, 160, 248, '#141828');
+    for (let i = 0; i < 12; i++) _r(c, 0, 18 + i * 10, 160, 1, '#1a1e32');
+    _r(c, 0, 12, 160, 1, '#1e2236');
+
+    // ── Lab equipment LEFT — tubes and pipes ──
+    _r(c, 4, 82, 2, 120, '#484858');
+    _r(c, 22, 82, 2, 120, '#484858');
+    _r(c, 4, 82, 20, 2, '#585868');
+    _r(c, 4, 200, 20, 2, '#585868');
+    _r(c, 4, 120, 20, 2, '#484858');
+    _r(c, 4, 160, 20, 2, '#484858');
+    _r(c, 12, 82, 2, 120, '#484858');
+    // Tube 1
+    _r(c, 7, 86, 4, 30, '#1a3a4a');
+    { const lv = 18 + Math.round(Math.sin(f * 0.08) * 4);
+      _r(c, 7, 86 + (30 - lv), 4, lv, '#4fc3f7');
+      c.globalAlpha = 0.3; _r(c, 8, 86 + (30 - lv), 2, 3, '#9ae5ff'); c.globalAlpha = 1; }
+    // Tube 2
+    _r(c, 16, 86, 4, 30, '#1a3a4a');
+    { const lv = 22 + Math.round(Math.cos(f * 0.06) * 5);
+      _r(c, 16, 86 + (30 - lv), 4, lv, '#2a8aaa');
+      c.globalAlpha = 0.3; _r(c, 17, 86 + (30 - lv), 2, 3, '#6ac8e8'); c.globalAlpha = 1; }
+    // Tube 3
+    _r(c, 7, 124, 4, 32, '#1a3a4a');
+    { const lv = 20 + Math.round(Math.sin(f * 0.1 + 2) * 4);
+      _r(c, 7, 124 + (32 - lv), 4, lv, '#4fc3f7'); }
+    // Processing units
+    _r(c, 4, 164, 20, 34, '#1e2028');
+    _r(c, 4, 164, 20, 1, '#363a48');
+    _r(c, 6, 168, 16, 12, '#282c38');
+    _r(c, 6, 184, 16, 10, '#282c38');
+    if ((f + 2) % 10 < (isHot ? 8 : 4)) _r(c, 8, 170, 2, 2, '#4fc3f7');
+    if ((f + 5) % 12 < (isHot ? 9 : 3)) _r(c, 14, 170, 2, 2, act ? sc : '#4caf50');
+    if ((f + 1) % 8 < (isHot ? 6 : 2)) _r(c, 8, 186, 2, 2, '#4caf50');
+    // Bubbles
+    if (isHot) {
+        const bY = (f * 3) % 24;
+        c.globalAlpha = 0.6;
+        _r(c, 8, 116 - (bY % 24), 2, 2, '#9ae5ff');
+        _r(c, 17, 116 - ((bY + 8) % 24), 1, 1, '#9ae5ff');
+        c.globalAlpha = 1;
     }
 
-    const isActive = st !== 'idle';
-    const statusColors = { idle:'#4caf50', thinking:'#ffc107', typing:'#4caf50', tool:'#ff9800', agent:'#e040fb', done:'#4caf50' };
-    const stateCol = statusColors[st] || '#4caf50';
+    // ── Monitors ──
+    // Top-left 1
+    _r(c, 30, 20, 36, 28, '#16181e'); _r(c, 30, 20, 36, 1, '#2a2e38'); _r(c, 30, 20, 1, 28, '#2a2e38');
+    _r(c, 32, 22, 32, 24, '#060a14');
+    _r(c, 46, 48, 4, 4, '#2a2e38'); _r(c, 42, 52, 12, 2, '#363a48');
+    // Top-left 2
+    _r(c, 72, 20, 36, 28, '#16181e'); _r(c, 72, 20, 36, 1, '#2a2e38'); _r(c, 72, 20, 1, 28, '#2a2e38');
+    _r(c, 74, 22, 32, 24, '#060a14');
+    _r(c, 88, 48, 4, 4, '#2a2e38'); _r(c, 84, 52, 12, 2, '#363a48');
+    // Middle-left (wireframe)
+    _r(c, 30, 58, 36, 30, '#16181e'); _r(c, 30, 58, 36, 1, '#2a2e38'); _r(c, 30, 58, 1, 30, '#2a2e38');
+    _r(c, 32, 60, 32, 26, '#060a14');
+    // Middle-right (neural net)
+    _r(c, 72, 58, 46, 30, '#16181e'); _r(c, 72, 58, 46, 1, '#2a2e38'); _r(c, 72, 58, 1, 30, '#2a2e38');
+    _r(c, 74, 60, 42, 26, '#060a14');
+    // Main large
+    _r(c, 36, 100, 74, 42, '#16181e'); _r(c, 36, 100, 74, 1, '#2a2e38'); _r(c, 36, 100, 1, 42, '#2a2e38');
+    _r(c, 38, 102, 70, 38, '#060a14');
+    _r(c, 70, 142, 6, 5, '#2a2e38'); _r(c, 64, 147, 18, 2, '#363a48');
 
-    // ══════════════════════════════════════════════════════════════════
-    //  STEP 1: Draw screen animations on blank canvas
-    //  (mask will cut these to the green-screen monitor shapes)
-    // ══════════════════════════════════════════════════════════════════
-    const sx = W / 629, sy = H / 1024;
+    // ── Screen: Top-left 1 — Heatmap ──
+    { c.save(); c.beginPath(); c.rect(32, 22, 32, 24); c.clip();
+      for (let hy = 0; hy < 6; hy++) for (let hx = 0; hx < 8; hx++) {
+          const v = (Math.sin((hx + f * 0.15) * 0.7) * Math.cos((hy + f * 0.1) * 0.9) + 1) / 2;
+          const r = Math.round(v * 200 + 30), g = Math.round((1 - v) * 100 + 30), b = Math.round((1 - v) * 180 + 40);
+          c.globalAlpha = act ? 0.7 : 0.3;
+          _r(c, 32 + hx * 4, 22 + hy * 4, 4, 4, `rgb(${r},${g},${b})`);
+      } c.globalAlpha = 1; c.restore(); }
 
-    // Dark screen base
-    _rect(ctx, 0, 0, W, H, '#0a0c18');
+    // ── Screen: Top-left 2 — Token stream ──
+    { c.save(); c.beginPath(); c.rect(74, 22, 32, 24); c.clip();
+      const tc = ['#569cd6','#ce9178','#4ec9b0','#c586c0','#dcdcaa','#9cdcfe'];
+      const sp = isHot ? 4 : 1;
+      for (let i = 0; i < 10; i++) {
+          const tx = 74 + ((i * 12 - f * sp) % 48 + 48) % 48 - 8;
+          c.globalAlpha = act ? 0.7 : 0.25;
+          _r(c, tx, 24 + (i % 5) * 4, 3 + (i % 4), 3, tc[i % tc.length]);
+      } c.globalAlpha = 1; c.restore(); }
 
-    // ── NEURAL NETWORK — nodes + connections (fills upper canvas area) ──
-    {
-        const nodes = [];
-        for (let i = 0; i < 25; i++) {
-            nodes.push({
-                x: (40 + (i * 113 + 19) % 550) * sx,
-                y: (40 + (i * 79 + 13) % 480) * sy,
-            });
-        }
-        // Connections
-        ctx.lineWidth = Math.max(1, Math.round(1.5 * sx));
-        for (let i = 0; i < nodes.length; i++) {
-            for (let d = 1; d <= 2; d++) {
-                const j = (i + d + (i * 3) % 4) % nodes.length;
-                const dist = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y);
-                if (dist > W * 0.4) continue;
-                const pulseAlpha = isActive
-                    ? 0.18 + Math.sin(f * 0.06 + i + j) * 0.10
-                    : 0.05 + Math.sin(f * 0.02 + i) * 0.02;
-                ctx.globalAlpha = pulseAlpha;
-                ctx.strokeStyle = stateCol;
-                ctx.beginPath();
-                ctx.moveTo(nodes[i].x, nodes[i].y);
-                ctx.lineTo(nodes[j].x, nodes[j].y);
-                ctx.stroke();
-            }
-        }
-        // Nodes
-        for (let i = 0; i < nodes.length; i++) {
-            const pulseOn = isActive ? ((f + i * 3) % 10) < 7 : ((f + i * 5) % 16) < 4;
-            const r = Math.round((pulseOn ? (isActive ? 7 : 5) : 3) * sx);
-            ctx.globalAlpha = isActive ? 0.50 : 0.18;
-            ctx.fillStyle = stateCol;
-            ctx.beginPath(); ctx.arc(nodes[i].x, nodes[i].y, r, 0, 6.28); ctx.fill();
-            // Bright center
-            ctx.globalAlpha *= 0.7;
-            ctx.fillStyle = '#ffffff';
-            ctx.beginPath(); ctx.arc(nodes[i].x, nodes[i].y, Math.round(2.5 * sx), 0, 6.28); ctx.fill();
-        }
-        // Traveling pulses
-        if (isActive) {
-            ctx.globalAlpha = 0.75;
-            for (let p = 0; p < 5; p++) {
-                const i = (f + p * 5) % nodes.length;
-                const j = (i + 1 + (i * 3) % 4) % nodes.length;
-                const t = ((f * 2 + p * 20) % 25) / 25;
-                ctx.fillStyle = '#ffffff';
-                ctx.beginPath();
-                ctx.arc(nodes[i].x + (nodes[j].x - nodes[i].x) * t,
-                        nodes[i].y + (nodes[j].y - nodes[i].y) * t,
-                        Math.round(3.5 * sx), 0, 6.28);
-                ctx.fill();
-            }
-        }
-        ctx.globalAlpha = 1.0;
+    // ── Screen: Middle-left — Wireframe cube ──
+    { c.save(); c.beginPath(); c.rect(32, 60, 32, 26); c.clip();
+      const cx = 48, cy = 73, sz = 8, a = f * 0.08;
+      const co = Math.cos(a), si = Math.sin(a);
+      const vt = [[-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]];
+      const pr = vt.map(v => { const rx = v[0]*co - v[2]*si; return [cx + Math.round(rx * sz), cy + Math.round((v[1]*0.8 - (v[0]*si + v[2]*co)*0.3) * sz)]; });
+      const ed = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+      c.globalAlpha = act ? 0.7 : 0.3; c.strokeStyle = isHot ? sc : '#4ec9b0'; c.lineWidth = 1;
+      ed.forEach(e => { c.beginPath(); c.moveTo(pr[e[0]][0], pr[e[0]][1]); c.lineTo(pr[e[1]][0], pr[e[1]][1]); c.stroke(); });
+      pr.forEach(p => _r(c, p[0], p[1], 2, 2, isHot ? '#fff' : '#4ec9b0'));
+      c.globalAlpha = 1; c.restore(); }
+
+    // ── Screen: Middle-right — Neural network ──
+    { c.save(); c.beginPath(); c.rect(74, 60, 42, 26); c.clip();
+      const ly = [3, 5, 4, 2], lx = [80, 90, 100, 110], nd = [];
+      ly.forEach((cnt, li) => { for (let ni = 0; ni < cnt; ni++) nd.push({ x: lx[li], y: 64 + (26 - cnt * 5) / 2 + ni * 5, l: li }); });
+      c.globalAlpha = act ? 0.2 : 0.08; c.strokeStyle = '#4a6080'; c.lineWidth = 1;
+      for (let i = 0; i < nd.length; i++) for (let j = i + 1; j < nd.length; j++)
+          if (nd[j].l === nd[i].l + 1) { c.beginPath(); c.moveTo(nd[i].x, nd[i].y); c.lineTo(nd[j].x, nd[j].y); c.stroke(); }
+      nd.forEach((n, i) => { c.globalAlpha = act ? 0.5 + Math.sin(f * 0.15 + i * 0.7) * 0.3 : 0.3; _r(c, n.x - 1, n.y - 1, 3, 3, isHot ? sc : '#4ec9b0'); });
+      if (act) { c.globalAlpha = 0.8; const pp = (f * 3) % 30; _r(c, 80 + pp, 70 + Math.sin(pp * 0.3) * 4, 2, 2, '#fff'); }
+      c.globalAlpha = 1; c.restore(); }
+
+    // ── Screen: Main — Code processing ──
+    { c.save(); c.beginPath(); c.rect(38, 102, 70, 38); c.clip();
+      const sp = isHot ? 3 : 1, lH = 3, scr = (f * sp) % lH;
+      const sn = ['#569cd6','#ce9178','#dcdcaa','#c586c0','#9cdcfe','#4ec9b0','#d4d4d4'];
+      for (let i = 0; i < 16; i++) {
+          const ly = 102 + i * lH - scr; if (ly < 100 || ly > 140) continue;
+          const s = i * 37 + 13;
+          c.globalAlpha = isHot ? 0.3 : 0.15; _r(c, 39, ly, 3, 2, '#636369');
+          c.globalAlpha = isHot ? 0.75 : 0.35;
+          let xp = 43 + (s % 3) * 3;
+          for (let t = 0; t < 3 + (s % 2); t++) { const tw = 3 + ((s + t * 11) % 14); _r(c, xp, ly, tw, 2, sn[(s + t) % sn.length]); xp += tw + 2; if (xp > 104) break; }
+      }
+      if (st === 'tool') { const pg = ((f * 4) % 60) / 60; _r(c, 40, 134, 64, 3, '#1a1c2a'); _r(c, 40, 134, Math.round(64 * pg), 3, sc); _r(c, 40, 134, Math.round(64 * pg), 1, '#fff'); }
+      if (isHot && f % 6 < 4) { c.globalAlpha = 0.9; _r(c, 50, 118, 1, 3, '#aeafad'); }
+      c.globalAlpha = 1; c.restore(); }
+
+    // ── CRT scan lines ──
+    { const sf = (f * 3) % 40; c.globalAlpha = 0.06;
+      _r(c, 32, 22 + (sf % 24), 32, 1, '#fff'); _r(c, 74, 22 + (sf % 24), 32, 1, '#fff');
+      _r(c, 32, 60 + (sf % 26), 32, 1, '#fff'); _r(c, 74, 60 + (sf % 26), 42, 1, '#fff');
+      _r(c, 38, 102 + (sf % 38), 70, 1, '#fff'); c.globalAlpha = 1; }
+
+    // ── Bulletin board ──
+    _r(c, 118, 22, 38, 48, '#8a7350'); _r(c, 118, 22, 38, 1, '#9a8360'); _r(c, 118, 22, 1, 48, '#6a5838');
+    _r(c, 121, 26, 14, 10, '#e4dcc8'); _r(c, 122, 27, 12, 1, '#888'); _r(c, 122, 29, 10, 1, '#888'); _r(c, 122, 31, 8, 1, '#888');
+    _r(c, 138, 25, 14, 12, '#c8dcd0'); _r(c, 139, 26, 12, 1, '#666'); _r(c, 139, 28, 10, 1, '#666'); _r(c, 139, 30, 11, 1, '#666');
+    _r(c, 124, 40, 12, 14, '#ffdca0'); _r(c, 125, 41, 10, 1, '#886'); _r(c, 125, 43, 8, 1, '#886');
+    _r(c, 140, 42, 12, 10, '#d8c8e0'); _r(c, 141, 43, 10, 1, '#668'); _r(c, 141, 45, 8, 1, '#668');
+    _r(c, 126, 25, 3, 3, '#e05050'); _r(c, 143, 24, 3, 3, '#5050e0'); _r(c, 128, 39, 3, 3, '#50b050'); _r(c, 144, 41, 3, 3, '#e0e050');
+
+    // ── Color palette ──
+    _r(c, 120, 76, 34, 18, '#1a1c24'); _r(c, 120, 76, 34, 1, '#2a2e38');
+    { const pc = ['#e05050','#e09050','#e0e050','#50e050','#50e0e0','#5050e0','#e050e0','#fff','#802020','#804020','#808020','#208020','#208080','#202080','#802080','#888'];
+      for (let py = 0; py < 2; py++) for (let px = 0; px < 8; px++) _r(c, 122 + px * 4, 78 + py * 7, 3, 5, pc[py * 8 + px]); }
+
+    // ── Equipment panel (right) ──
+    _r(c, 120, 98, 34, 44, '#1e2028'); _r(c, 120, 98, 34, 1, '#363a48');
+    for (let i = 0; i < 4; i++) { _r(c, 124 + i * 8, 104, 4, 4, '#282c38');
+        if ((f + i * 3) % 10 < (isHot ? 7 : 3)) _r(c, 125 + i * 8, 105, 2, 2, i % 2 === 0 ? sc : '#4caf50'); }
+    for (let i = 0; i < 3; i++) { _r(c, 124, 114 + i * 8, 26, 2, '#282c38');
+        _r(c, 124 + Math.round(10 + Math.sin(f * 0.05 + i) * 8), 113 + i * 8, 4, 4, '#4a4e60'); }
+
+    // ── Desk ──
+    _r(c, 28, 150, 108, 3, '#6a5a3e'); _r(c, 28, 150, 108, 1, '#7a6a4e');
+    _r(c, 28, 153, 108, 14, '#4a3c2a'); _r(c, 28, 166, 108, 1, '#3a2e1e');
+    _r(c, 32, 167, 3, 28, '#4a3c2a'); _r(c, 131, 167, 3, 28, '#4a3c2a');
+    // Keyboard
+    _r(c, 52, 151, 26, 5, '#26262e'); _r(c, 52, 151, 26, 1, '#3a3a44');
+    for (let kx = 0; kx < 5; kx++) for (let ky = 0; ky < 2; ky++) _r(c, 54 + kx * 4, 152 + ky * 2, 3, 1, '#404050');
+    // Mouse
+    _r(c, 82, 152, 4, 4, '#2a2a34'); _r(c, 83, 152, 2, 2, '#3a3a44');
+
+    // ── Character (AI researcher — behind-right view) ──
+    { const cx = 94, by = 130, br = st === 'idle' ? Math.round(Math.sin(f * 0.07) * 0.6) : 0;
+      // Hair
+      _r(c, cx - 5, by + br, 10, 5, '#2a1a0e'); _r(c, cx - 6, by + 2 + br, 12, 4, '#1e140a');
+      // Ponytail
+      _r(c, cx + 5, by + 4 + br, 3, 8, '#2a1a0e'); _r(c, cx + 6, by + 8 + br, 2, 6, '#1e140a');
+      // Ears + neck
+      _r(c, cx - 7, by + 3 + br, 2, 3, '#c49460'); _r(c, cx + 5, by + 3 + br, 2, 3, '#c49460');
+      _r(c, cx - 4, by + 6 + br, 8, 3, '#c49460'); _r(c, cx - 3, by + 9 + br, 6, 3, '#b08450');
+      // Shoulders
+      _r(c, cx - 16, by + 12 + br, 34, 5, '#444e36'); _r(c, cx - 16, by + 12 + br, 34, 1, '#5a6848');
+      // Torso
+      _r(c, cx - 14, by + 17 + br, 30, 22, '#5a6848');
+      _r(c, cx - 14, by + 17 + br, 4, 10, '#4a5838'); _r(c, cx + 10, by + 17 + br, 4, 10, '#4a5838');
+      _r(c, cx, by + 17 + br, 1, 22, '#444e36');
+      _r(c, cx - 5, by + 12 + br, 10, 3, '#6a785a');
+      _r(c, cx - 14, by + 38 + br, 30, 1, '#3e4a32');
+      // Lower body
+      _r(c, cx - 12, by + 39 + br, 26, 14, '#2a2a34'); _r(c, cx - 10, by + 53 + br, 22, 5, '#222230');
+      // Arms
+      const tp = st === 'typing', th = st === 'thinking', dn = st === 'done';
+      const lw = tp ? [0,-1,0,1][f%4] : 0, rw = tp ? [1,0,-1,0][f%4] : 0;
+      if (dn) {
+          _r(c, cx-20, by+6, 5, 12, '#444e36'); _r(c, cx-21, by+2, 4, 6, '#5a6848'); _r(c, cx-21, by, 3, 3, '#c49460');
+          _r(c, cx+15, by+6, 5, 12, '#444e36'); _r(c, cx+16, by+2, 4, 6, '#5a6848'); _r(c, cx+18, by, 3, 3, '#c49460');
+      } else if (th) {
+          _r(c, cx-17, by+14, 4, 14, '#444e36'); _r(c, cx-19, by+12, 4, 4, '#5a6848'); _r(c, cx-20, by+12, 3, 2, '#c49460');
+          const tf = [0,1,2,1][f%4];
+          _r(c, cx+13, by+14, 4, 8-tf*2, '#444e36'); _r(c, cx+12, by+6+(2-tf), 5, 6, '#5a6848'); _r(c, cx+11, by+4+(2-tf), 3, 3, '#c49460');
+      } else {
+          _r(c, cx-17, by+14, 4, 12+lw, '#444e36'); _r(c, cx-20, by+13, 5, 3, '#5a6848'); _r(c, cx-22, by+12+lw, 3, 2, '#c49460');
+          _r(c, cx+13, by+14, 4, 12+rw, '#444e36'); _r(c, cx+16, by+13, 5, 3, '#5a6848'); _r(c, cx+20, by+12+rw, 3, 2, '#c49460');
+      }
     }
 
-    // ── ATTENTION HEATMAP — grid of colored squares (upper-left area) ──
-    {
-        const gridLeft = W * 0.02, gridTop = H * 0.04;
-        const cellSize = Math.max(Math.round(8 * sx), 2);
-        const gap = Math.max(Math.round(2 * sx), 1);
-        const cols = 20, rows = 16;
-        for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-                const heat = isActive
-                    ? 0.3 + Math.sin(f * 0.08 + r * 0.5 + c * 0.3) * 0.3 + Math.cos(f * 0.05 + c * 0.7) * 0.2
-                    : 0.05 + Math.sin(f * 0.02 + r * 0.3 + c * 0.2) * 0.04;
-                const clampedHeat = Math.max(0, Math.min(1, heat));
-                // Color: blue → cyan → yellow → red
-                let heatCol;
-                if (clampedHeat < 0.33) heatCol = `rgb(${Math.round(clampedHeat * 3 * 40)},${Math.round(clampedHeat * 3 * 80)},${Math.round(150 + clampedHeat * 3 * 100)})`;
-                else if (clampedHeat < 0.66) heatCol = `rgb(${Math.round((clampedHeat - 0.33) * 3 * 200)},${Math.round(180 + (clampedHeat - 0.33) * 3 * 75)},${Math.round(80)})`;
-                else heatCol = `rgb(${Math.round(200 + (clampedHeat - 0.66) * 3 * 55)},${Math.round(255 - (clampedHeat - 0.66) * 3 * 180)},${Math.round(30)})`;
-                ctx.globalAlpha = isActive ? 0.55 : 0.18;
-                ctx.fillStyle = heatCol;
-                ctx.fillRect(gridLeft + c * (cellSize + gap), gridTop + r * (cellSize + gap), cellSize, cellSize);
-            }
-        }
-        ctx.globalAlpha = 1.0;
+    // ── Chair ──
+    _r(c, 72, 184, 4, 16, '#1e1e2a'); _r(c, 112, 184, 4, 16, '#1e1e2a');
+    _r(c, 72, 184, 4, 1, '#2e2e40'); _r(c, 112, 184, 4, 1, '#2e2e40');
+    _r(c, 74, 196, 40, 5, '#242434'); _r(c, 74, 196, 40, 1, '#2e2e40');
+    _r(c, 90, 201, 8, 8, '#1e1e2a'); _r(c, 82, 208, 24, 2, '#2a2c36');
+    _r(c, 80, 210, 4, 3, '#1a1c24'); _r(c, 104, 210, 4, 3, '#1a1c24');
+
+    // ── Coffee mug ──
+    _r(c, 118, 206, 5, 7, '#8b6e4e'); _r(c, 122, 208, 3, 3, '#8b6e4e');
+    _r(c, 123, 209, 2, 1, '#0a0c16'); _r(c, 118, 206, 5, 1, '#aaa');
+
+    // ── HYDRA server ──
+    _r(c, 6, 218, 48, 32, '#2a2c3a'); _r(c, 6, 218, 48, 1, '#3a3e4e'); _r(c, 6, 218, 1, 32, '#3a3e4e');
+    _r(c, 8, 222, 44, 8, '#222430'); _r(c, 8, 232, 44, 8, '#222430'); _r(c, 8, 242, 44, 6, '#222430');
+    c.font = '5px monospace'; c.fillStyle = '#4a6080'; c.fillText('HYDRA', 14, 228);
+    for (let i = 0; i < 6; i++) {
+        if ((f + i * 4) % 12 < (isHot ? 9 : 4)) _r(c, 10 + i * 7, 236, 2, 2, i % 2 === 0 ? sc : '#4caf50');
+        if ((f + i * 3 + 5) % 14 < (isHot ? 8 : 3)) _r(c, 10 + i * 7, 244, 2, 2, '#4caf50');
     }
 
-    // ── TOKEN STREAM — colored blocks flowing right (mid area) ──
-    {
-        const streamY = H * 0.32;
-        const streamH = H * 0.12;
-        const blockW = Math.max(Math.round(14 * sx), 3);
-        const gap = Math.max(Math.round(3 * sx), 1);
-        const tokenColors = ['#569cd6','#ce9178','#dcdcaa','#c586c0','#9cdcfe','#4ec9b0','#e040fb','#ff9800','#4fc3f7'];
-        const scrollX = (f * (isActive ? 5 : 2)) % (blockW + gap);
-        for (let i = 0; i < 35; i++) {
-            const bx = -scrollX + i * (blockW + gap);
-            if (bx > W || bx + blockW < 0) continue;
-            const by = streamY + Math.round(((i * 29 + 7) % 5) * (streamH / 5));
-            const bw = Math.round(blockW * (0.5 + ((i * 17 + 3) % 10) / 10));
-            const bh = Math.max(Math.round(8 * sy), 2);
-            const colorIdx = (i * 7 + 3) % tokenColors.length;
-            ctx.globalAlpha = isActive ? 0.55 : 0.18;
-            ctx.fillStyle = tokenColors[colorIdx];
-            ctx.fillRect(bx, by, bw, bh);
-        }
-        ctx.globalAlpha = 1.0;
-    }
+    // ── Floor ──
+    _r(c, 0, 212, 160, 48, '#0a0c14');
+    for (let i = 0; i < 5; i++) _r(c, 0, 216 + i * 9, 160, 1, '#12141e');
+    // Cables
+    _r(c, 60, 216, 40, 1, '#12121e'); _r(c, 60, 216, 1, 20, '#12121e');
+    _r(c, 100, 220, 1, 16, '#12121e'); _r(c, 80, 236, 30, 1, '#12121e');
+    _r(c, 110, 224, 30, 1, '#12121e'); _r(c, 140, 224, 1, 20, '#12121e');
+    _r(c, 60, 248, 80, 1, '#12121e'); _r(c, 40, 230, 1, 20, '#12121e');
 
-    // ── EMBEDDING SCATTER — drifting dots (lower-left) ──
-    {
-        for (let i = 0; i < 40; i++) {
-            const baseX = (30 + (i * 67 + 11) % 250) * sx;
-            const baseY = (520 + (i * 43 + 7) % 200) * sy;
-            const drift = isActive ? 3 : 0.5;
-            const dx = Math.sin(f * 0.04 + i * 1.7) * drift * sx;
-            const dy = Math.cos(f * 0.03 + i * 2.3) * drift * sy;
-            // Cluster coloring
-            const cluster = i % 4;
-            const dotColors = ['#4fc3f7','#e040fb','#ff9800','#4caf50'];
-            ctx.globalAlpha = isActive ? 0.50 : 0.15;
-            ctx.fillStyle = dotColors[cluster];
-            ctx.beginPath();
-            ctx.arc(baseX + dx, baseY + dy, Math.round((isActive ? 4 : 2.5) * sx), 0, 6.28);
-            ctx.fill();
-        }
-        ctx.globalAlpha = 1.0;
-    }
+    // ── Title bar ──
+    _r(c, 0, 0, 160, 12, '#0a0c14'); _r(c, 0, 11, 160, 1, '#1a1c2a');
+    c.font = 'bold 7px monospace'; c.fillStyle = '#8a8aaa'; c.fillText('AI WORKSTATION', 4, 8);
+    _r(c, 108, 3, 5, 5, sc);
+    if (act) { c.globalAlpha = 0.4; _r(c, 107, 2, 7, 7, sc); c.globalAlpha = 1; }
+    c.font = '6px monospace'; c.fillStyle = '#6a6a8a'; c.fillText('[' + _stLabel(st) + ']', 116, 8);
 
-    // ── LOSS CURVE — animated line chart (lower-right) ──
-    {
-        const chartLeft = W * 0.5, chartTop = H * 0.58, chartW = W * 0.48, chartH = H * 0.18;
-        // Axis
-        ctx.globalAlpha = isActive ? 0.20 : 0.08;
-        ctx.fillStyle = '#444466';
-        ctx.fillRect(chartLeft, chartTop + chartH, chartW, Math.max(1, Math.round(1 * sy)));
-        ctx.fillRect(chartLeft, chartTop, Math.max(1, Math.round(1 * sx)), chartH);
-        // Curve
-        ctx.globalAlpha = isActive ? 0.6 : 0.2;
-        ctx.strokeStyle = stateCol;
-        ctx.lineWidth = Math.max(1, Math.round(2 * sx));
-        ctx.beginPath();
-        const drawLen = isActive ? Math.min(1.0, (f % 60) / 40) : 0.6;
-        const points = Math.round(drawLen * 30);
-        for (let i = 0; i <= points; i++) {
-            const t = i / 30;
-            const x = chartLeft + t * chartW;
-            // Decaying loss with noise
-            const loss = Math.exp(-t * 2.5) * 0.85 + Math.sin(i * 1.2 + f * 0.1) * 0.04 + 0.08;
-            const y = chartTop + (1 - loss) * chartH;
-            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-        // Moving dot at the end of the curve
-        if (isActive && points > 0) {
-            const t = points / 30;
-            const endX = chartLeft + t * chartW;
-            const loss = Math.exp(-t * 2.5) * 0.85 + Math.sin(points * 1.2 + f * 0.1) * 0.04 + 0.08;
-            const endY = chartTop + (1 - loss) * chartH;
-            ctx.globalAlpha = 0.8;
-            ctx.fillStyle = '#ffffff';
-            ctx.beginPath(); ctx.arc(endX, endY, Math.round(3 * sx), 0, 6.28); ctx.fill();
-        }
-        ctx.globalAlpha = 1.0;
-    }
+    // ── Ambient effects ──
+    if (isHot) { c.globalAlpha = 0.04; _r(c, 30, 14, 80, 6, sc); c.globalAlpha = 0.03; _r(c, 40, 214, 80, 14, sc); c.globalAlpha = 1; }
+    if (st === 'done') { c.globalAlpha = 0.06 + Math.sin(f * 0.2) * 0.03; _r(c, 0, 0, _GW, _GH, '#4caf50'); c.globalAlpha = 1; }
 
-    // ── Thinking spinner (center) ──
-    if (st === 'thinking') {
-        ctx.globalAlpha = 0.5;
-        ctx.fillStyle = '#ffc107';
-        for (let i = 0; i < 5; i++) {
-            const angle = (f * 0.15 + i * (6.28 / 5)) % 6.28;
-            const cx = W * 0.45 + Math.cos(angle) * W * 0.06;
-            const cy = H * 0.42 + Math.sin(angle) * H * 0.04;
-            const size = i === (f % 5) ? 8 : 4;
-            ctx.fillRect(Math.round(cx), Math.round(cy), Math.round(size * sx), Math.round(size * sy));
-        }
-        ctx.globalAlpha = 1.0;
-    }
-
-    // ── Subtle CRT scan line ──
-    {
-        const scanY = (f * 3) % H;
-        ctx.globalAlpha = 0.05;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, scanY, W, Math.max(2, Math.round(H / 350)));
-        ctx.globalAlpha = 1.0;
-    }
-
-    // ══════════════════════════════════════════════════════════════════
-    //  STEP 2: Mask — cut to green screen areas only
-    // ══════════════════════════════════════════════════════════════════
-    ctx.globalCompositeOperation = 'destination-in';
-    ctx.drawImage(_pxAIMask.mask, 0, 0, W, H);
-
-    // ══════════════════════════════════════════════════════════════════
-    //  STEP 3: Draw clean image behind
-    // ══════════════════════════════════════════════════════════════════
-    ctx.globalCompositeOperation = 'destination-over';
-    ctx.drawImage(_pxAIMask.clean, 0, 0, W, H);
-
-    // Reset for overlays
-    ctx.globalCompositeOperation = 'source-over';
-
-    // ══════════════════════════════════════════════════════════════════
-    //  STEP 4: Non-screen overlays
-    // ══════════════════════════════════════════════════════════════════
-
-    // Status LED
-    if (f % 10 < 7) {
-        ctx.fillStyle = stateCol;
-        ctx.beginPath();
-        ctx.arc(Math.round(395 * sx), Math.round(35 * sy), Math.round(8 * sx), 0, 6.28);
-        ctx.fill();
-        ctx.fillStyle = stateCol + '33';
-        ctx.beginPath();
-        ctx.arc(Math.round(395 * sx), Math.round(35 * sy), Math.round(14 * sx), 0, 6.28);
-        ctx.fill();
-    }
-
-    // Pipe glow pulse
-    if (isActive) {
-        ctx.globalAlpha = 0.06 + Math.sin(f * 0.08) * 0.04;
-        ctx.fillStyle = stateCol;
-        ctx.fillRect(Math.round(95 * sx), Math.round(400 * sy), Math.round(15 * sx), Math.round(250 * sy));
-        ctx.globalAlpha = 0.4;
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(Math.round(98 * sx), Math.round((410 + (f * 6) % 240) * sy), Math.round(9 * sx), Math.round(6 * sy));
-        ctx.globalAlpha = 1.0;
-    }
-
-    // Cyan arrow
-    {
-        ctx.globalAlpha = Math.max(0, 0.06 + Math.sin(f * 0.12) * 0.04);
-        ctx.fillStyle = '#00e5ff';
-        ctx.fillRect(Math.round(15 * sx), Math.round(415 * sy), Math.round(38 * sx), Math.round(45 * sy));
-        ctx.globalAlpha = 1.0;
-    }
-
-    // Color palette dots
-    {
-        const palColors = ['#ff4444','#ff9800','#ffeb3b','#4caf50','#4fc3f7','#e040fb','#ffffff'];
-        for (let i = 0; i < palColors.length; i++) {
-            const on = isActive ? (((f + i * 2) % 10) < 7) : (((f + i * 3) % 16) < 5);
-            if (on) {
-                ctx.globalAlpha = isActive ? 0.30 : 0.12;
-                ctx.fillStyle = palColors[i];
-                ctx.beginPath();
-                ctx.arc(Math.round((530 + (i % 4) * 16) * sx), Math.round((450 + Math.floor(i / 4) * 16) * sy),
-                        Math.round(5 * sx), 0, 6.28);
-                ctx.fill();
-            }
-        }
-        ctx.globalAlpha = 1.0;
-    }
-
-    // Server rack LEDs
-    for (let i = 0; i < 8; i++) {
-        const rate = isActive ? (st === 'tool' ? 12 : 8) : 3;
-        if (((f + i * 5) % 16) < rate) {
-            ctx.fillStyle = stateCol;
-            ctx.fillRect(Math.round(50 * sx), Math.round((545 + i * 24) * sy), Math.round(6 * sx), Math.round(6 * sy));
-        }
-        if (((f + i * 7 + 3) % 14) < rate) {
-            ctx.fillStyle = stateCol + 'aa';
-            ctx.fillRect(Math.round(66 * sx), Math.round((545 + i * 24) * sy), Math.round(6 * sx), Math.round(6 * sy));
-        }
-    }
-
-    // Bottom LEDs
-    for (let i = 0; i < 4; i++) {
-        if (((f + i * 6) % 18) < (isActive ? 12 : 4)) {
-            ctx.fillStyle = i % 2 === 0 ? '#4caf50' : stateCol;
-            ctx.fillRect(Math.round((75 + i * 38) * sx), Math.round(905 * sy), Math.round(4 * sx), Math.round(4 * sy));
-        }
-    }
-
-    // Character breathing
-    if (st === 'idle') {
-        ctx.globalAlpha = Math.max(0, 0.02 + Math.sin(f * 0.05) * 0.01);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(Math.round(200 * sx), Math.round(598 * sy), Math.round(220 * sx), Math.round(200 * sy));
-        ctx.globalAlpha = 1.0;
-    }
+    // ── Blit ──
+    const dc = cv.getContext('2d');
+    dc.imageSmoothingEnabled = false;
+    dc.clearRect(0, 0, cv.width, cv.height);
+    dc.drawImage(_offAI, 0, 0, cv.width, cv.height);
 }
 
 // ─── Event stream ───────────────────────────────────────────────────────────
