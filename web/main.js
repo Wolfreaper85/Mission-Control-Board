@@ -2562,31 +2562,141 @@ function _renderUserCanvas() {
     const stateCol = statusColors[st] || '#4caf50';
 
     // ══════════════════════════════════════════════════════════════════
-    //  STEP 1: Draw screen animations on blank canvas (fills everything)
+    //  STEP 1: Draw screen animations on blank canvas
+    //  (mask will cut these to the green-screen monitor shapes)
     // ══════════════════════════════════════════════════════════════════
+    const sx = W / 629, sy = H / 1024;
 
-    // Dark screen base for all green areas
-    _rect(ctx, 0, 0, W, H, '#080810');
+    // Dark screen base
+    _rect(ctx, 0, 0, W, H, '#0a0c18');
 
-    // Matrix rain — fills entire canvas, mask will cut it to screens
-    const matrixAlpha = isActive ? 0.7 : (st === 'thinking' ? 0.5 : 0.35);
-    const matrixColor = isActive ? (st === 'tool' ? '#ff9800' : st === 'agent' ? '#e040fb' : '#00ff41') : '#00ff41';
-    _drawMatrixRainFull(ctx, f, W, H, matrixAlpha, matrixColor);
+    // ── CODE EDITOR — syntax-highlighted scrolling code (fills most of canvas) ──
+    {
+        const lineH = Math.max(Math.round(11 * sy), 3);
+        const scrollOff = (f * (isActive ? 3 : 1)) % lineH;
+        // Syntax color palette (IDE dark theme)
+        const syntaxColors = ['#569cd6','#ce9178','#dcdcaa','#c586c0','#9cdcfe','#4ec9b0','#d4d4d4','#6a9955','#b5cea8','#d7ba7d'];
+        for (let i = 0; i < 80; i++) {
+            const lineY = i * lineH - scrollOff;
+            if (lineY < -lineH || lineY > H) continue;
+            // Indent level (0-3)
+            const indent = ((i * 7 + 3) % 4);
+            const indentPx = Math.round(indent * 16 * sx);
+            // Multiple "tokens" per line
+            const seed = (i * 31 + 7);
+            let xPos = indentPx + Math.round(8 * sx);
+            const numTokens = 2 + (seed % 4);
+            for (let t = 0; t < numTokens; t++) {
+                const tokenW = Math.round((18 + ((seed + t * 53) % 55)) * sx);
+                const colorIdx = (seed + t * 3) % syntaxColors.length;
+                ctx.globalAlpha = isActive ? 0.7 : 0.35;
+                ctx.fillStyle = syntaxColors[colorIdx];
+                ctx.fillRect(xPos, lineY, tokenW, Math.round(4 * sy));
+                xPos += tokenW + Math.round((6 + (t * 7) % 8) * sx);
+                if (xPos > W * 0.9) break;
+            }
+            // Line numbers on left edge
+            ctx.globalAlpha = isActive ? 0.25 : 0.12;
+            ctx.fillStyle = '#636369';
+            ctx.fillRect(Math.round(2 * sx), lineY, Math.round(4 * sx), Math.round(4 * sy));
+        }
+        // Active line highlight (current editing line)
+        if (isActive) {
+            const activeLine = Math.round((H * 0.4 + Math.sin(f * 0.05) * H * 0.1));
+            ctx.globalAlpha = 0.06;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, activeLine, W, lineH);
+            ctx.globalAlpha = 1.0;
+        }
+        // Blinking cursor
+        if (f % 8 < 5) {
+            ctx.globalAlpha = isActive ? 0.8 : 0.3;
+            ctx.fillStyle = '#aeafad';
+            const cursorY = Math.round((H * 0.4 + Math.sin(f * 0.05) * H * 0.1));
+            ctx.fillRect(Math.round(100 * sx), cursorY, Math.round(2 * sx), lineH);
+            ctx.globalAlpha = 1.0;
+        }
+    }
 
-    // State-colored glow wash over everything
-    if (isActive) {
-        ctx.globalAlpha = 0.08 + Math.sin(f * 0.1) * 0.03;
-        ctx.fillStyle = { thinking:'#ffc107', typing:'#4fc3f7', tool:'#ff9800', agent:'#e040fb' }[st] || '#4fc3f7';
-        ctx.fillRect(0, 0, W, H);
+    // ── TERMINAL OUTPUT — green-on-black log (lower portion of canvas) ──
+    {
+        const termTop = H * 0.55;
+        const termLineH = Math.max(Math.round(10 * sy), 3);
+        const termScroll = (f * (isActive ? 2 : 1)) % termLineH;
+        for (let i = 0; i < 30; i++) {
+            const lineY = termTop + i * termLineH - termScroll;
+            if (lineY < termTop - termLineH || lineY > H) continue;
+            const seed = (i * 43 + f * 2 + 11);
+            // Prompt symbol
+            ctx.globalAlpha = isActive ? 0.5 : 0.2;
+            ctx.fillStyle = '#4ec9b0';
+            ctx.fillRect(Math.round(6 * sx), lineY, Math.round(8 * sx), Math.round(3 * sy));
+            // Command/output text
+            const isError = (seed % 20) === 0;
+            const isWarning = (seed % 12) === 0;
+            ctx.fillStyle = isError ? '#f44747' : isWarning ? '#cca700' : '#4af626';
+            const lineW = Math.round((30 + (seed % 120)) * sx);
+            ctx.fillRect(Math.round(18 * sx), lineY, lineW, Math.round(3 * sy));
+        }
         ctx.globalAlpha = 1.0;
     }
 
-    // Scan line sweep across all screens
+    // ── DEBUG GRAPHS — bar chart (right side of canvas) ──
+    {
+        const graphLeft = W * 0.6;
+        const graphTop = H * 0.55;
+        const graphH = H * 0.35;
+        const barCount = 12;
+        const barW = Math.max(Math.round((W * 0.35) / barCount * 0.7), 2);
+        const barGap = Math.max(Math.round((W * 0.35) / barCount * 0.3), 1);
+        for (let i = 0; i < barCount; i++) {
+            const amp = isActive
+                ? 0.3 + Math.sin(f * 0.12 + i * 0.8) * 0.3 + Math.cos(f * 0.07 + i * 0.5) * 0.2
+                : 0.1 + Math.sin(f * 0.03 + i * 0.6) * 0.08;
+            const barH = Math.round(Math.max(0.05, amp) * graphH);
+            const bx = graphLeft + i * (barW + barGap);
+            const by = graphTop + graphH - barH;
+            // Bar color based on value
+            const hue = amp > 0.6 ? '#f44747' : amp > 0.3 ? '#cca700' : '#4ec9b0';
+            ctx.globalAlpha = isActive ? 0.6 : 0.25;
+            ctx.fillStyle = hue;
+            ctx.fillRect(bx, by, barW, barH);
+            // Bright tip
+            ctx.globalAlpha = isActive ? 0.8 : 0.3;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(bx, by, barW, Math.max(1, Math.round(2 * sy)));
+        }
+        // Axis line
+        ctx.globalAlpha = isActive ? 0.2 : 0.08;
+        ctx.fillStyle = '#444466';
+        ctx.fillRect(graphLeft, graphTop + graphH, W * 0.35, Math.max(1, Math.round(1 * sy)));
+        ctx.globalAlpha = 1.0;
+    }
+
+    // ── WAVEFORM — audio-style oscilloscope (bottom strip) ──
+    {
+        const waveY = H * 0.92;
+        ctx.globalAlpha = isActive ? 0.5 : 0.15;
+        ctx.strokeStyle = isActive ? stateCol : '#334455';
+        ctx.lineWidth = Math.max(1, Math.round(1.5 * sx));
+        ctx.beginPath();
+        for (let x = 0; x < W; x += Math.max(2, Math.round(3 * sx))) {
+            const val = isActive
+                ? Math.sin(x * 0.03 + f * 0.2) * 12 + Math.sin(x * 0.07 + f * 0.15) * 8
+                : Math.sin(x * 0.02 + f * 0.05) * 4;
+            const py = waveY + val * sy;
+            if (x === 0) ctx.moveTo(x, py); else ctx.lineTo(x, py);
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1.0;
+    }
+
+    // ── Subtle CRT scan line ──
     {
         const scanY = (f * 4) % H;
-        ctx.globalAlpha = 0.08;
+        ctx.globalAlpha = 0.06;
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, scanY, W, Math.max(2, Math.round(H / 300)));
+        ctx.fillRect(0, scanY, W, Math.max(2, Math.round(H / 350)));
         ctx.globalAlpha = 1.0;
     }
 
@@ -2684,127 +2794,194 @@ function _renderAICanvas() {
 
     // ══════════════════════════════════════════════════════════════════
     //  STEP 1: Draw screen animations on blank canvas
+    //  (mask will cut these to the green-screen monitor shapes)
     // ══════════════════════════════════════════════════════════════════
+    const sx = W / 629, sy = H / 1024;
 
     // Dark screen base
-    _rect(ctx, 0, 0, W, H, '#080810');
+    _rect(ctx, 0, 0, W, H, '#0a0c18');
 
-    // Neural network visualization — nodes and connections across all screens
-    const sx = W / 629, sy = H / 1024;
+    // ── NEURAL NETWORK — nodes + connections (fills upper canvas area) ──
     {
-        // Scattered nodes that will appear on whichever screens the mask reveals
         const nodes = [];
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < 25; i++) {
             nodes.push({
-                x: (50 + (i * 137 + 23) % 530) * sx,
-                y: (50 + (i * 89 + 17) % 450) * sy,
+                x: (40 + (i * 113 + 19) % 550) * sx,
+                y: (40 + (i * 79 + 13) % 480) * sy,
             });
         }
-
-        // Connection lines
+        // Connections
         ctx.lineWidth = Math.max(1, Math.round(1.5 * sx));
         for (let i = 0; i < nodes.length; i++) {
-            const j = (i + 1 + (i * 3) % 5) % nodes.length;
-            const pulseAlpha = isActive
-                ? 0.20 + Math.sin(f * 0.08 + i) * 0.10
-                : 0.06 + Math.sin(f * 0.03 + i) * 0.03;
-            ctx.globalAlpha = pulseAlpha;
-            ctx.strokeStyle = stateCol;
-            ctx.beginPath();
-            ctx.moveTo(nodes[i].x, nodes[i].y);
-            ctx.lineTo(nodes[j].x, nodes[j].y);
-            ctx.stroke();
+            for (let d = 1; d <= 2; d++) {
+                const j = (i + d + (i * 3) % 4) % nodes.length;
+                const dist = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y);
+                if (dist > W * 0.4) continue;
+                const pulseAlpha = isActive
+                    ? 0.18 + Math.sin(f * 0.06 + i + j) * 0.10
+                    : 0.05 + Math.sin(f * 0.02 + i) * 0.02;
+                ctx.globalAlpha = pulseAlpha;
+                ctx.strokeStyle = stateCol;
+                ctx.beginPath();
+                ctx.moveTo(nodes[i].x, nodes[i].y);
+                ctx.lineTo(nodes[j].x, nodes[j].y);
+                ctx.stroke();
+            }
         }
-
-        // Nodes — pulsing circles
+        // Nodes
         for (let i = 0; i < nodes.length; i++) {
             const pulseOn = isActive ? ((f + i * 3) % 10) < 7 : ((f + i * 5) % 16) < 4;
-            if (pulseOn) {
-                ctx.globalAlpha = isActive ? 0.45 : 0.15;
-                ctx.fillStyle = stateCol;
-                ctx.beginPath();
-                ctx.arc(nodes[i].x, nodes[i].y, Math.round((isActive ? 8 : 5) * sx), 0, 6.28);
-                ctx.fill();
-                ctx.globalAlpha = isActive ? 0.6 : 0.2;
-                ctx.fillStyle = '#ffffff';
-                ctx.beginPath();
-                ctx.arc(nodes[i].x, nodes[i].y, Math.round(3 * sx), 0, 6.28);
-                ctx.fill();
-            }
+            const r = Math.round((pulseOn ? (isActive ? 7 : 5) : 3) * sx);
+            ctx.globalAlpha = isActive ? 0.50 : 0.18;
+            ctx.fillStyle = stateCol;
+            ctx.beginPath(); ctx.arc(nodes[i].x, nodes[i].y, r, 0, 6.28); ctx.fill();
+            // Bright center
+            ctx.globalAlpha *= 0.7;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath(); ctx.arc(nodes[i].x, nodes[i].y, Math.round(2.5 * sx), 0, 6.28); ctx.fill();
         }
-
-        // Traveling data pulses
+        // Traveling pulses
         if (isActive) {
-            ctx.globalAlpha = 0.7;
-            for (let p = 0; p < 4; p++) {
+            ctx.globalAlpha = 0.75;
+            for (let p = 0; p < 5; p++) {
                 const i = (f + p * 5) % nodes.length;
-                const j = (i + 1 + (i * 3) % 5) % nodes.length;
-                const t = ((f * 2 + p * 25) % 30) / 30;
-                const px = nodes[i].x + (nodes[j].x - nodes[i].x) * t;
-                const py = nodes[i].y + (nodes[j].y - nodes[i].y) * t;
+                const j = (i + 1 + (i * 3) % 4) % nodes.length;
+                const t = ((f * 2 + p * 20) % 25) / 25;
                 ctx.fillStyle = '#ffffff';
                 ctx.beginPath();
-                ctx.arc(px, py, Math.round(4 * sx), 0, 6.28);
+                ctx.arc(nodes[i].x + (nodes[j].x - nodes[i].x) * t,
+                        nodes[i].y + (nodes[j].y - nodes[i].y) * t,
+                        Math.round(3.5 * sx), 0, 6.28);
                 ctx.fill();
             }
         }
         ctx.globalAlpha = 1.0;
     }
 
-    // Brain glow in the general center-left area (mask clips to correct screen)
+    // ── ATTENTION HEATMAP — grid of colored squares (upper-left area) ──
     {
-        const brainCx = W * 0.22, brainCy = H * 0.38;
-        const brainR = W * 0.08;
-        const brainAlpha = isActive
-            ? (st === 'thinking' ? 0.50 : st === 'agent' ? 0.40 : 0.25)
-            : 0.10;
-        const brainCol = st === 'thinking' ? '#ffc107' : st === 'agent' ? '#e040fb' : st === 'tool' ? '#ff9800' : '#ff4488';
-        const grad = ctx.createRadialGradient(brainCx, brainCy, 0, brainCx, brainCy, brainR * 3);
-        grad.addColorStop(0, brainCol);
-        grad.addColorStop(0.3, brainCol + '88');
-        grad.addColorStop(1, brainCol + '00');
-        ctx.globalAlpha = brainAlpha + Math.sin(f * 0.15) * 0.08;
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, W, H);
-        ctx.globalAlpha = 1.0;
-    }
-
-    // Scrolling text lines across all screens
-    {
-        const lineH = Math.max(Math.round(12 * sy), 2);
-        const txtColor = isActive ? (st === 'tool' ? '#ff9800' : st === 'agent' ? '#e040fb' : '#4fc3f7') : '#1a3a4a';
-        const scrollOff = (f * 3) % lineH;
-        for (let i = 0; i < 60; i++) {
-            const lineY = i * lineH - scrollOff;
-            if (lineY < 0 || lineY > H) continue;
-            ctx.globalAlpha = isActive ? 0.30 : 0.10;
-            ctx.fillStyle = txtColor;
-            const lw = Math.round((20 + ((i * 53 + 7) % 120)) * sx);
-            const lx = Math.round(((i * 97) % 400) * sx);
-            ctx.fillRect(lx, lineY, lw, Math.round(3 * sy));
+        const gridLeft = W * 0.02, gridTop = H * 0.04;
+        const cellSize = Math.max(Math.round(8 * sx), 2);
+        const gap = Math.max(Math.round(2 * sx), 1);
+        const cols = 20, rows = 16;
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const heat = isActive
+                    ? 0.3 + Math.sin(f * 0.08 + r * 0.5 + c * 0.3) * 0.3 + Math.cos(f * 0.05 + c * 0.7) * 0.2
+                    : 0.05 + Math.sin(f * 0.02 + r * 0.3 + c * 0.2) * 0.04;
+                const clampedHeat = Math.max(0, Math.min(1, heat));
+                // Color: blue → cyan → yellow → red
+                let heatCol;
+                if (clampedHeat < 0.33) heatCol = `rgb(${Math.round(clampedHeat * 3 * 40)},${Math.round(clampedHeat * 3 * 80)},${Math.round(150 + clampedHeat * 3 * 100)})`;
+                else if (clampedHeat < 0.66) heatCol = `rgb(${Math.round((clampedHeat - 0.33) * 3 * 200)},${Math.round(180 + (clampedHeat - 0.33) * 3 * 75)},${Math.round(80)})`;
+                else heatCol = `rgb(${Math.round(200 + (clampedHeat - 0.66) * 3 * 55)},${Math.round(255 - (clampedHeat - 0.66) * 3 * 180)},${Math.round(30)})`;
+                ctx.globalAlpha = isActive ? 0.55 : 0.18;
+                ctx.fillStyle = heatCol;
+                ctx.fillRect(gridLeft + c * (cellSize + gap), gridTop + r * (cellSize + gap), cellSize, cellSize);
+            }
         }
         ctx.globalAlpha = 1.0;
     }
 
-    // Thinking spinner
+    // ── TOKEN STREAM — colored blocks flowing right (mid area) ──
+    {
+        const streamY = H * 0.32;
+        const streamH = H * 0.12;
+        const blockW = Math.max(Math.round(14 * sx), 3);
+        const gap = Math.max(Math.round(3 * sx), 1);
+        const tokenColors = ['#569cd6','#ce9178','#dcdcaa','#c586c0','#9cdcfe','#4ec9b0','#e040fb','#ff9800','#4fc3f7'];
+        const scrollX = (f * (isActive ? 5 : 2)) % (blockW + gap);
+        for (let i = 0; i < 35; i++) {
+            const bx = -scrollX + i * (blockW + gap);
+            if (bx > W || bx + blockW < 0) continue;
+            const by = streamY + Math.round(((i * 29 + 7) % 5) * (streamH / 5));
+            const bw = Math.round(blockW * (0.5 + ((i * 17 + 3) % 10) / 10));
+            const bh = Math.max(Math.round(8 * sy), 2);
+            const colorIdx = (i * 7 + 3) % tokenColors.length;
+            ctx.globalAlpha = isActive ? 0.55 : 0.18;
+            ctx.fillStyle = tokenColors[colorIdx];
+            ctx.fillRect(bx, by, bw, bh);
+        }
+        ctx.globalAlpha = 1.0;
+    }
+
+    // ── EMBEDDING SCATTER — drifting dots (lower-left) ──
+    {
+        for (let i = 0; i < 40; i++) {
+            const baseX = (30 + (i * 67 + 11) % 250) * sx;
+            const baseY = (520 + (i * 43 + 7) % 200) * sy;
+            const drift = isActive ? 3 : 0.5;
+            const dx = Math.sin(f * 0.04 + i * 1.7) * drift * sx;
+            const dy = Math.cos(f * 0.03 + i * 2.3) * drift * sy;
+            // Cluster coloring
+            const cluster = i % 4;
+            const dotColors = ['#4fc3f7','#e040fb','#ff9800','#4caf50'];
+            ctx.globalAlpha = isActive ? 0.50 : 0.15;
+            ctx.fillStyle = dotColors[cluster];
+            ctx.beginPath();
+            ctx.arc(baseX + dx, baseY + dy, Math.round((isActive ? 4 : 2.5) * sx), 0, 6.28);
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1.0;
+    }
+
+    // ── LOSS CURVE — animated line chart (lower-right) ──
+    {
+        const chartLeft = W * 0.5, chartTop = H * 0.58, chartW = W * 0.48, chartH = H * 0.18;
+        // Axis
+        ctx.globalAlpha = isActive ? 0.20 : 0.08;
+        ctx.fillStyle = '#444466';
+        ctx.fillRect(chartLeft, chartTop + chartH, chartW, Math.max(1, Math.round(1 * sy)));
+        ctx.fillRect(chartLeft, chartTop, Math.max(1, Math.round(1 * sx)), chartH);
+        // Curve
+        ctx.globalAlpha = isActive ? 0.6 : 0.2;
+        ctx.strokeStyle = stateCol;
+        ctx.lineWidth = Math.max(1, Math.round(2 * sx));
+        ctx.beginPath();
+        const drawLen = isActive ? Math.min(1.0, (f % 60) / 40) : 0.6;
+        const points = Math.round(drawLen * 30);
+        for (let i = 0; i <= points; i++) {
+            const t = i / 30;
+            const x = chartLeft + t * chartW;
+            // Decaying loss with noise
+            const loss = Math.exp(-t * 2.5) * 0.85 + Math.sin(i * 1.2 + f * 0.1) * 0.04 + 0.08;
+            const y = chartTop + (1 - loss) * chartH;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        // Moving dot at the end of the curve
+        if (isActive && points > 0) {
+            const t = points / 30;
+            const endX = chartLeft + t * chartW;
+            const loss = Math.exp(-t * 2.5) * 0.85 + Math.sin(points * 1.2 + f * 0.1) * 0.04 + 0.08;
+            const endY = chartTop + (1 - loss) * chartH;
+            ctx.globalAlpha = 0.8;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath(); ctx.arc(endX, endY, Math.round(3 * sx), 0, 6.28); ctx.fill();
+        }
+        ctx.globalAlpha = 1.0;
+    }
+
+    // ── Thinking spinner (center) ──
     if (st === 'thinking') {
         ctx.globalAlpha = 0.5;
         ctx.fillStyle = '#ffc107';
         for (let i = 0; i < 5; i++) {
             const angle = (f * 0.15 + i * (6.28 / 5)) % 6.28;
-            const cx = W * 0.5 + Math.cos(angle) * W * 0.08;
+            const cx = W * 0.45 + Math.cos(angle) * W * 0.06;
             const cy = H * 0.42 + Math.sin(angle) * H * 0.04;
-            const size = i === (f % 5) ? 10 : 5;
+            const size = i === (f % 5) ? 8 : 4;
             ctx.fillRect(Math.round(cx), Math.round(cy), Math.round(size * sx), Math.round(size * sy));
         }
         ctx.globalAlpha = 1.0;
     }
 
-    // State glow wash
-    if (isActive) {
-        ctx.globalAlpha = 0.06 + Math.sin(f * 0.12) * 0.02;
-        ctx.fillStyle = { thinking:'#ffc107', typing:'#4fc3f7', tool:'#ff9800', agent:'#e040fb', done:'#4caf50' }[st] || '#4fc3f7';
-        ctx.fillRect(0, 0, W, H);
+    // ── Subtle CRT scan line ──
+    {
+        const scanY = (f * 3) % H;
+        ctx.globalAlpha = 0.05;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, scanY, W, Math.max(2, Math.round(H / 350)));
         ctx.globalAlpha = 1.0;
     }
 
