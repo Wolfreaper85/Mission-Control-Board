@@ -104,6 +104,8 @@ let _pixelAnimTimer = null;
 let _pxImgUser = null;  // loaded Image for user scene
 let _pxImgAI = null;    // loaded Image for AI scene
 let _pxImgLoaded = false;
+let _pxUserMask = null;  // { mask: Canvas, clean: Canvas } — chroma key data
+let _pxAIMask = null;
 
 // ─── Launcher init ───────────────────────────────────────────────────────────
 
@@ -830,7 +832,7 @@ function _buildLayout() {
             <div class="mc-pixel-section" id="mc-pixel-section">
                 <div class="mc-pixel-stage">
                     <div class="mc-pixel-desk">
-                        <canvas class="mc-pixel-canvas" id="mc-px-user-cv" width="428" height="703"></canvas>
+                        <canvas class="mc-pixel-canvas" id="mc-px-user-cv" width="315" height="512"></canvas>
                     </div>
                     <div class="mc-pixel-hub">
                         <div class="mc-pixel-hub-core" id="mc-pixel-hub">
@@ -846,7 +848,7 @@ function _buildLayout() {
                         <div class="mc-pixel-status" id="mc-pixel-status">IDLE</div>
                     </div>
                     <div class="mc-pixel-desk">
-                        <canvas class="mc-pixel-canvas" id="mc-px-ai-cv" width="428" height="703"></canvas>
+                        <canvas class="mc-pixel-canvas" id="mc-px-ai-cv" width="315" height="512"></canvas>
                     </div>
                 </div>
             </div>
@@ -2388,7 +2390,7 @@ function _renderAgents(agents) {
     }).join('');
 }
 
-// ─── 16-Bit Pixel Art Engine ────────────────────────────────────────────────
+// ─── 16-Bit Pixel Art Engine (Chroma Key) ───────────────────────────────────
 
 function _setPixelState(state) {
     if (_pixelState === state) return;
@@ -2413,18 +2415,67 @@ function _updatePixelFromEvent(evt) {
     if (map[evt.type]) _setPixelState(map[evt.type]);
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   Chroma Key — scan image for green pixels, build mask + clean canvases
+   ══════════════════════════════════════════════════════════════════════════════ */
+function _buildChromaMask(img) {
+    const w = img.naturalWidth, h = img.naturalHeight;
+    // Read pixels from image
+    const tmp = document.createElement('canvas');
+    tmp.width = w; tmp.height = h;
+    const tCtx = tmp.getContext('2d');
+    tCtx.drawImage(img, 0, 0);
+    const srcData = tCtx.getImageData(0, 0, w, h);
+    const px = srcData.data;
+
+    // Build mask canvas (white where green, transparent elsewhere)
+    const mask = document.createElement('canvas');
+    mask.width = w; mask.height = h;
+    const mCtx = mask.getContext('2d');
+    const mData = mCtx.createImageData(w, h);
+    const mp = mData.data;
+
+    // Build clean canvas (green replaced with dark screen color)
+    const cleanData = tCtx.getImageData(0, 0, w, h);
+    const cp = cleanData.data;
+
+    for (let i = 0; i < px.length; i += 4) {
+        const r = px[i], g = px[i + 1], b = px[i + 2];
+        // Detect green screen: high green, low red and blue
+        const isGreen = g > 160 && r < 120 && b < 120;
+        if (isGreen) {
+            mp[i] = 255; mp[i + 1] = 255; mp[i + 2] = 255; mp[i + 3] = 255;
+            cp[i] = 8; cp[i + 1] = 8; cp[i + 2] = 16; cp[i + 3] = 255;
+        }
+        // else: mask stays transparent (0,0,0,0), clean keeps original pixel
+    }
+
+    mCtx.putImageData(mData, 0, 0);
+
+    const clean = document.createElement('canvas');
+    clean.width = w; clean.height = h;
+    const cCtx = clean.getContext('2d');
+    cCtx.putImageData(cleanData, 0, 0);
+
+    return { mask, clean };
+}
+
 function _initPixelArt() {
     _pixelFrame = 0;
-    // Load background images once
     if (!_pxImgLoaded) {
         _pxImgLoaded = true;
         _pxImgUser = new Image();
         _pxImgUser.src = '/plugin-web/mission-control/Coder-Agent.png';
         _pxImgAI = new Image();
         _pxImgAI.src = '/plugin-web/mission-control/AI-Workstation.png';
-        // Render once images load
-        _pxImgUser.onload = () => _renderPixelScenes();
-        _pxImgAI.onload = () => _renderPixelScenes();
+        _pxImgUser.onload = () => {
+            _pxUserMask = _buildChromaMask(_pxImgUser);
+            _renderPixelScenes();
+        };
+        _pxImgAI.onload = () => {
+            _pxAIMask = _buildChromaMask(_pxImgAI);
+            _renderPixelScenes();
+        };
     }
     _renderPixelScenes();
     if (_pixelAnimTimer) clearInterval(_pixelAnimTimer);
@@ -2435,113 +2486,61 @@ function _stopPixelArt() {
 }
 
 /* ── Drawing helpers ── */
-function _px(ctx, x, y, c) { ctx.fillStyle = c; ctx.fillRect(x, y, 1, 1); }
 function _rect(ctx, x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); }
-function _sprite(ctx, ox, oy, rows, pal) {
-    for (let r = 0; r < rows.length; r++) {
-        for (let c = 0; c < rows[r].length; c++) {
-            const ch = rows[r][c];
-            if (ch === '.' || !pal[ch]) continue;
-            ctx.fillStyle = pal[ch];
-            ctx.fillRect(ox + c, oy + r, 1, 1);
-        }
-    }
-}
 
 function _syncCanvasSize(cv) {
-    // Match canvas internal resolution to its CSS display size so art stays crisp at any zoom
     const rect = cv.getBoundingClientRect();
-    const dw = Math.round(rect.width) || 428;
-    const dh = Math.round(rect.height) || 703;
+    const dw = Math.round(rect.width) || 315;
+    const dh = Math.round(rect.height) || 512;
     if (cv.width !== dw || cv.height !== dh) { cv.width = dw; cv.height = dh; }
 }
 function _renderPixelScenes() { _renderUserCanvas(); _renderAICanvas(); }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   Shared: draw image background scaled to canvas
+   Shared animation helpers
    ══════════════════════════════════════════════════════════════════════════════ */
-function _drawBg(ctx, img, W, H) {
-    if (!img || !img.complete || !img.naturalWidth) { _rect(ctx, 0, 0, W, H, '#080810'); return; }
-    ctx.drawImage(img, 0, 0, W, H);
-}
-
-/* ══════════════════════════════════════════════════════════════════════════════
-   USER SCENE — Coder Agent PNG background + animated overlays
-   ══════════════════════════════════════════════════════════════════════════════ */
-/* ── Persistent matrix rain columns — seeded per-column so rain is deterministic ── */
 let _matrixCols = null;
 function _ensureMatrixCols(count) {
-    if (_matrixCols && _matrixCols.length === count) return;
+    if (_matrixCols && _matrixCols.length >= count) return;
     _matrixCols = [];
     for (let i = 0; i < count; i++) {
         _matrixCols.push({
-            y: Math.floor(Math.random() * 40),      // start offset
-            speed: 1 + Math.floor(Math.random() * 3), // fall speed
+            y: Math.floor(Math.random() * 40),
+            speed: 1 + Math.floor(Math.random() * 3),
             chars: [],
         });
-        // pre-fill random chars for this column
-        for (let j = 0; j < 30; j++) {
+        for (let j = 0; j < 30; j++)
             _matrixCols[i].chars.push(String.fromCharCode(0x30A0 + Math.floor(Math.random() * 96)));
-        }
     }
 }
 
-/* ── Polygon helpers for angled monitor screens ── */
-// pts = [[x,y],[x,y],[x,y],[x,y]] in original image coords (855×1406), drawn clockwise
-function _polyPath(ctx, sx, sy, pts) {
-    ctx.beginPath();
-    ctx.moveTo(Math.round(pts[0][0] * sx), Math.round(pts[0][1] * sy));
-    for (let i = 1; i < pts.length; i++)
-        ctx.lineTo(Math.round(pts[i][0] * sx), Math.round(pts[i][1] * sy));
-    ctx.closePath();
-}
-function _blackoutPoly(ctx, sx, sy, pts, bgColor) {
-    ctx.globalAlpha = 1.0;
-    ctx.fillStyle = bgColor || '#0a0a14';
-    _polyPath(ctx, sx, sy, pts);
-    ctx.fill();
-}
-// Clip + blackout, returns a save point — caller MUST ctx.restore() after drawing
-function _clipScreen(ctx, sx, sy, pts, bgColor) {
-    ctx.save();
-    _blackoutPoly(ctx, sx, sy, pts, bgColor);
-    _polyPath(ctx, sx, sy, pts);
-    ctx.clip();
-}
-
-/* ── Draw matrix rain inside a rectangular screen area ── */
-function _drawMatrixRain(ctx, f, sx, sy, left, top, right, bottom, alpha, color) {
-    const colW = Math.max(Math.round(18 * sx), 2);
-    const charH = Math.max(Math.round(20 * sy), 2);
-    const cols = Math.floor((right - left) * sx / colW);
+/* Draw matrix rain filling the entire canvas (mask will clip it to screens) */
+function _drawMatrixRainFull(ctx, f, W, H, alpha, color) {
+    const colW = Math.max(Math.round(W / 30), 4);
+    const charH = Math.max(Math.round(H / 40), 4);
+    const cols = Math.ceil(W / colW);
     _ensureMatrixCols(cols);
-    ctx.save();
-    // Clip to monitor area
-    ctx.beginPath();
-    ctx.rect(Math.round(left * sx), Math.round(top * sy), Math.round((right - left) * sx), Math.round((bottom - top) * sy));
-    ctx.clip();
-
-    const baseAlpha = alpha;
     for (let c = 0; c < cols; c++) {
         const col = _matrixCols[c % _matrixCols.length];
-        const x = Math.round(left * sx) + c * colW;
-        const headY = ((f * col.speed + col.y * charH) % (Math.round((bottom - top) * sy) + charH * 12)) - charH * 6;
-        // Draw trail of characters
+        const x = c * colW;
+        const headY = ((f * col.speed * charH + col.y * charH) % (H + charH * 14)) - charH * 6;
         const trailLen = 8 + (c % 5);
         for (let t = 0; t < trailLen; t++) {
             const cy = headY - t * charH;
-            if (cy < Math.round(top * sy) - charH || cy > Math.round(bottom * sy)) continue;
+            if (cy < -charH || cy > H) continue;
             const fade = t === 0 ? 1.0 : Math.max(0.1, 1.0 - t / trailLen);
-            ctx.globalAlpha = baseAlpha * fade;
+            ctx.globalAlpha = alpha * fade;
             ctx.fillStyle = t === 0 ? '#ffffff' : color;
             ctx.font = `${charH}px monospace`;
-            const ch = col.chars[(t + Math.floor(f / 3)) % col.chars.length];
-            ctx.fillText(ch, x, cy);
+            ctx.fillText(col.chars[(t + Math.floor(f / 3)) % col.chars.length], x, cy);
         }
     }
-    ctx.restore();
     ctx.globalAlpha = 1.0;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   USER SCENE — Coder Agent with chroma key compositing
+   ══════════════════════════════════════════════════════════════════════════════ */
 
 function _renderUserCanvas() {
     const cv = document.getElementById('mc-px-user-cv');
@@ -2551,206 +2550,119 @@ function _renderUserCanvas() {
     const f = _pixelFrame, st = _pixelState;
     const W = cv.width, H = cv.height;
     ctx.clearRect(0, 0, W, H);
+
+    if (!_pxUserMask) {
+        // Images not loaded yet — dark fallback
+        _rect(ctx, 0, 0, W, H, '#080810');
+        return;
+    }
+
     const isActive = st === 'typing' || st === 'tool' || st === 'agent';
+    const statusColors = { idle:'#4caf50', thinking:'#ffc107', typing:'#4caf50', tool:'#ff9800', agent:'#e040fb', done:'#4caf50' };
+    const stateCol = statusColors[st] || '#4caf50';
 
-    // Draw PNG background
-    _drawBg(ctx, _pxImgUser, W, H);
+    // ══════════════════════════════════════════════════════════════════
+    //  STEP 1: Draw screen animations on blank canvas (fills everything)
+    // ══════════════════════════════════════════════════════════════════
 
-    // Scale factors (original image is 855×1406)
-    const sx = W / 855, sy = H / 1406;
+    // Dark screen base for all green areas
+    _rect(ctx, 0, 0, W, H, '#080810');
 
-    // Monitor regions in original-image coords (estimated from actual art):
-    // Top-left big monitor:     65, 80  → 405, 365
-    // Top-right code monitor:   430, 80 → 780, 230
-    // Mid-left small:           65, 395 → 275, 545
-    // Mid-center small:         290,395 → 495, 545
-    // Mid-right portrait:       510,395 → 790, 595
+    // Matrix rain — fills entire canvas, mask will cut it to screens
+    const matrixAlpha = isActive ? 0.7 : (st === 'thinking' ? 0.5 : 0.35);
+    const matrixColor = isActive ? (st === 'tool' ? '#ff9800' : st === 'agent' ? '#e040fb' : '#00ff41') : '#00ff41';
+    _drawMatrixRainFull(ctx, f, W, H, matrixAlpha, matrixColor);
 
-    const statusColors = {
-        idle: '#4caf50', thinking: '#ffc107', typing: '#4caf50',
-        tool: '#ff9800', agent: '#e040fb', done: '#4caf50'
-    };
-
-    // ── Status indicator LED — near "[WORKING]" ──
-    const ledOn = f % 10 < 7;
-    if (ledOn) {
-        ctx.fillStyle = statusColors[st] || '#4caf50';
-        ctx.beginPath();
-        ctx.arc(Math.round(530 * sx), Math.round(48 * sy), Math.round(12 * sx), 0, 6.28);
-        ctx.fill();
-        ctx.fillStyle = (statusColors[st] || '#4caf50') + '33';
-        ctx.beginPath();
-        ctx.arc(Math.round(530 * sx), Math.round(48 * sy), Math.round(20 * sx), 0, 6.28);
-        ctx.fill();
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  MONITOR POLYGONS — angled corners matching the perspective art
-    //  Each array is [TL, TR, BR, BL] in original 855×1406 coords
-    // ═══════════════════════════════════════════════════════════════════════
-    const userScreens = {
-        topLeft:    [[62,82],  [398,82],  [393,358], [67,358]],    // Big fighting-game monitor
-        topRight:   [[432,78], [778,92],  [773,228], [435,218]],   // Code/text monitor (angled right)
-        midLeft:    [[65,398], [272,402], [268,540], [68,535]],    // Small game sprite
-        midCenter:  [[288,400],[492,402], [490,540], [290,538]],   // Small terminal
-        midRight:   [[510,392],[788,400], [783,590], [514,582]],   // Portrait (angled right)
-    };
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  TOP-LEFT BIG MONITOR — Matrix rain
-    // ═══════════════════════════════════════════════════════════════════════
-    {
-        _clipScreen(ctx, sx, sy, userScreens.topLeft, '#050510');
-        const matrixAlpha = isActive ? 0.55 : (st === 'thinking' ? 0.45 : 0.30);
-        const matrixColor = isActive ? (st === 'tool' ? '#ff9800' : st === 'agent' ? '#e040fb' : '#00ff41') : '#00ff41';
-        _drawMatrixRain(ctx, f, sx, sy, 62, 82, 398, 358, matrixAlpha, matrixColor);
-        // State-colored glow wash
-        const glowAlpha = isActive ? (0.08 + Math.sin(f * 0.1) * 0.03) : 0.03;
-        ctx.globalAlpha = glowAlpha;
-        ctx.fillStyle = { thinking:'#ffc107', typing:'#4fc3f7', tool:'#ff9800', agent:'#e040fb', idle:'#003300', done:'#4caf50' }[st] || '#003300';
+    // State-colored glow wash over everything
+    if (isActive) {
+        ctx.globalAlpha = 0.08 + Math.sin(f * 0.1) * 0.03;
+        ctx.fillStyle = { thinking:'#ffc107', typing:'#4fc3f7', tool:'#ff9800', agent:'#e040fb' }[st] || '#4fc3f7';
         ctx.fillRect(0, 0, W, H);
-        ctx.restore(); ctx.globalAlpha = 1.0;
+        ctx.globalAlpha = 1.0;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  TOP-RIGHT CODE MONITOR — Matrix rain (angled)
-    // ═══════════════════════════════════════════════════════════════════════
+    // Scan line sweep across all screens
     {
-        _clipScreen(ctx, sx, sy, userScreens.topRight, '#050510');
-        const matrixAlpha = isActive ? 0.48 : (st === 'thinking' ? 0.38 : 0.25);
-        const matrixColor = isActive ? (st === 'tool' ? '#ff9800' : st === 'agent' ? '#e040fb' : '#00ff41') : '#00ff41';
-        _drawMatrixRain(ctx, f + 50, sx, sy, 432, 78, 778, 228, matrixAlpha, matrixColor);
-        ctx.restore(); ctx.globalAlpha = 1.0;
+        const scanY = (f * 4) % H;
+        ctx.globalAlpha = 0.08;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, scanY, W, Math.max(2, Math.round(H / 300)));
+        ctx.globalAlpha = 1.0;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  MID-LEFT — Radar sweep
-    // ═══════════════════════════════════════════════════════════════════════
-    {
-        _clipScreen(ctx, sx, sy, userScreens.midLeft, '#060612');
-        const mCx = Math.round(170 * sx), mCy = Math.round(470 * sy);
-        const mR = Math.round(58 * sx);
-        // Radar circles
-        ctx.globalAlpha = 0.18;
-        ctx.strokeStyle = isActive ? '#4fc3f7' : '#1a4a2a';
-        ctx.lineWidth = Math.max(1, Math.round(1 * sx));
-        for (let r = 1; r <= 3; r++) {
-            ctx.beginPath(); ctx.arc(mCx, mCy, mR * r / 3, 0, 6.28); ctx.stroke();
-        }
-        // Sweep line
-        const sweepAngle = f * (isActive ? 0.12 : 0.04);
-        ctx.globalAlpha = 0.5;
-        ctx.strokeStyle = isActive ? (statusColors[st] || '#4fc3f7') : '#00ff41';
-        ctx.lineWidth = Math.max(1, Math.round(2 * sx));
-        ctx.beginPath(); ctx.moveTo(mCx, mCy);
-        ctx.lineTo(mCx + Math.cos(sweepAngle) * mR, mCy + Math.sin(sweepAngle) * mR);
-        ctx.stroke();
-        // Sweep trail
-        ctx.globalAlpha = 0.15;
-        ctx.beginPath(); ctx.moveTo(mCx, mCy);
-        ctx.arc(mCx, mCy, mR, sweepAngle - 0.5, sweepAngle); ctx.closePath();
-        ctx.fillStyle = isActive ? (statusColors[st] || '#4fc3f7') : '#00ff41';
+    // ══════════════════════════════════════════════════════════════════
+    //  STEP 2: Mask — cut animations to only the green screen areas
+    // ══════════════════════════════════════════════════════════════════
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(_pxUserMask.mask, 0, 0, W, H);
+
+    // ══════════════════════════════════════════════════════════════════
+    //  STEP 3: Draw clean image behind (non-screen areas)
+    // ══════════════════════════════════════════════════════════════════
+    ctx.globalCompositeOperation = 'destination-over';
+    ctx.drawImage(_pxUserMask.clean, 0, 0, W, H);
+
+    // Reset composite mode for overlay effects on top of everything
+    ctx.globalCompositeOperation = 'source-over';
+
+    // ══════════════════════════════════════════════════════════════════
+    //  STEP 4: Non-screen overlays (LEDs, steam, etc.) drawn on top
+    // ══════════════════════════════════════════════════════════════════
+    const sx = W / 629, sy = H / 1024;
+
+    // Status LED
+    if (f % 10 < 7) {
+        ctx.fillStyle = stateCol;
+        ctx.beginPath();
+        ctx.arc(Math.round(390 * sx), Math.round(35 * sy), Math.round(8 * sx), 0, 6.28);
         ctx.fill();
-        // Blips
-        if (isActive) {
-            ctx.globalAlpha = 0.7; ctx.fillStyle = '#ffffff';
-            const blips = [[0.3,0.5],[-0.4,-0.3],[0.6,-0.2],[-0.2,0.7]];
-            for (const [bx, by] of blips) {
-                if (((f + Math.floor(bx * 10)) % 15) < 10)
-                    ctx.fillRect(Math.round(mCx + bx * mR) - 1, Math.round(mCy + by * mR) - 1,
-                                 Math.round(3 * sx), Math.round(3 * sy));
-            }
-        }
-        ctx.restore(); ctx.globalAlpha = 1.0;
+        ctx.fillStyle = stateCol + '33';
+        ctx.beginPath();
+        ctx.arc(Math.round(390 * sx), Math.round(35 * sy), Math.round(14 * sx), 0, 6.28);
+        ctx.fill();
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  MID-CENTER — Terminal log
-    // ═══════════════════════════════════════════════════════════════════════
-    {
-        _clipScreen(ctx, sx, sy, userScreens.midCenter, '#060612');
-        const lineH = Math.max(Math.round(14 * sy), 2);
-        const termColor = isActive ? (st === 'tool' ? '#ff9800' : '#00ff41') : '#1a6a2a';
-        for (let i = 0; i < 12; i++) {
-            const lineY = Math.round(405 * sy) + i * lineH - ((f * 2) % lineH);
-            ctx.globalAlpha = isActive ? (0.4 + (i % 3) * 0.15) : 0.2;
-            ctx.fillStyle = termColor;
-            const lineW = Math.round((80 + ((i * 37 + f) % 100)) * sx);
-            ctx.fillRect(Math.round(298 * sx), lineY, Math.min(lineW, Math.round(185 * sx)), Math.round(4 * sy));
-        }
-        if (f % 8 < 5) {
-            ctx.globalAlpha = 0.7; ctx.fillStyle = '#ffffff';
-            ctx.fillRect(Math.round(298 * sx), Math.round(525 * sy), Math.round(8 * sx), Math.round(10 * sy));
-        }
-        ctx.restore(); ctx.globalAlpha = 1.0;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  MID-RIGHT — Waveform visualizer (angled)
-    // ═══════════════════════════════════════════════════════════════════════
-    {
-        _clipScreen(ctx, sx, sy, userScreens.midRight, '#060612');
-        const waveCenterY = Math.round(490 * sy);
-        const waveLeft = Math.round(522 * sx);
-        const waveW = Math.round(252 * sx);
-        const barW = Math.max(Math.round(6 * sx), 2);
-        const gap = Math.max(Math.round(2 * sx), 1);
-        const bars = Math.floor(waveW / (barW + gap));
-        const barCol = isActive ? (statusColors[st] || '#4fc3f7') : '#1a3a4a';
-        for (let i = 0; i < bars; i++) {
-            const amp = isActive
-                ? (Math.sin(f * 0.15 + i * 0.4) * 0.5 + Math.sin(f * 0.08 + i * 0.7) * 0.3 + 0.3)
-                : (Math.sin(f * 0.03 + i * 0.3) * 0.15 + 0.15);
-            const barH = Math.round(amp * 75 * sy);
-            const bx = waveLeft + i * (barW + gap);
-            ctx.globalAlpha = isActive ? 0.6 : 0.25;
-            ctx.fillStyle = barCol;
-            ctx.fillRect(bx, waveCenterY - barH / 2, barW, barH);
-            ctx.globalAlpha = isActive ? 0.8 : 0.3;
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(bx, waveCenterY - barH / 2, barW, Math.max(Math.round(2 * sy), 1));
-            ctx.fillRect(bx, waveCenterY + barH / 2 - Math.max(Math.round(2 * sy), 1), barW, Math.max(Math.round(2 * sy), 1));
-        }
-        ctx.restore(); ctx.globalAlpha = 1.0;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  DESK AREA — cyan arrow pulse, coffee steam, breathing, server LEDs
-    // ═══════════════════════════════════════════════════════════════════════
-    {
-        const arrAlpha = 0.06 + Math.sin(f * 0.12) * 0.04;
-        ctx.globalAlpha = Math.max(0, arrAlpha);
-        ctx.fillStyle = '#00e5ff';
-        ctx.fillRect(Math.round(770 * sx), Math.round(520 * sy), Math.round(60 * sx), Math.round(70 * sy));
-        ctx.globalAlpha = 1.0;
-    }
+    // Coffee steam
     if (f % 20 < 14) {
-        ctx.globalAlpha = 0.18; ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha = 0.20;
+        ctx.fillStyle = '#ffffff';
         for (let s = 0; s < 3; s++) {
-            const sway = Math.sin(f * 0.15 + s * 2.0) * 6;
-            const steamY = Math.round((700 - (f % 12 + s * 4) * 6) * sy);
-            if (steamY > Math.round(650 * sy))
-                ctx.fillRect(Math.round((145 + sway) * sx), steamY, Math.round(7 * sx), Math.round(4 * sy));
+            const sway = Math.sin(f * 0.15 + s * 2.0) * 4;
+            const steamY = Math.round((505 - (f % 12 + s * 4) * 4) * sy);
+            if (steamY > Math.round(475 * sy))
+                ctx.fillRect(Math.round((108 + sway) * sx), steamY, Math.round(5 * sx), Math.round(3 * sy));
         }
         ctx.globalAlpha = 1.0;
     }
+
+    // Cyan arrow glow
+    {
+        ctx.globalAlpha = Math.max(0, 0.06 + Math.sin(f * 0.12) * 0.04);
+        ctx.fillStyle = '#00e5ff';
+        ctx.fillRect(Math.round(565 * sx), Math.round(375 * sy), Math.round(45 * sx), Math.round(50 * sy));
+        ctx.globalAlpha = 1.0;
+    }
+
+    // Character breathing
     if (st === 'idle') {
         ctx.globalAlpha = Math.max(0, 0.02 + Math.sin(f * 0.06) * 0.01);
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(Math.round(250 * sx), Math.round(700 * sy), Math.round(350 * sx), Math.round(300 * sy));
+        ctx.fillRect(Math.round(180 * sx), Math.round(510 * sy), Math.round(260 * sx), Math.round(220 * sy));
         ctx.globalAlpha = 1.0;
     }
+
+    // Server rack LEDs
     for (let i = 0; i < 6; i++) {
         if (((f + i * 4) % 14) < (isActive ? 10 : 4)) {
-            ctx.fillStyle = isActive ? (statusColors[st] || '#4caf50') : '#4caf50';
-            ctx.fillRect(Math.round((80 + i * 24) * sx), Math.round((1140 + (i % 2) * 30) * sy),
-                         Math.round(6 * sx), Math.round(6 * sy));
+            ctx.fillStyle = isActive ? stateCol : '#4caf50';
+            ctx.fillRect(Math.round((60 + i * 18) * sx), Math.round((830 + (i % 2) * 22) * sy),
+                         Math.round(4 * sx), Math.round(4 * sy));
         }
     }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   AI SCENE — AI Workstation PNG background + animated overlays
+   AI SCENE — AI Workstation with chroma key compositing
    ══════════════════════════════════════════════════════════════════════════════ */
 function _renderAICanvas() {
     const cv = document.getElementById('mc-px-ai-cv');
@@ -2760,374 +2672,235 @@ function _renderAICanvas() {
     const f = _pixelFrame, st = _pixelState;
     const W = cv.width, H = cv.height;
     ctx.clearRect(0, 0, W, H);
-    const isActive = st !== 'idle';
 
-    const statusColors = {
-        idle: '#4caf50', thinking: '#ffc107', typing: '#4caf50',
-        tool: '#ff9800', agent: '#e040fb', done: '#4caf50'
-    };
+    if (!_pxAIMask) {
+        _rect(ctx, 0, 0, W, H, '#080810');
+        return;
+    }
+
+    const isActive = st !== 'idle';
+    const statusColors = { idle:'#4caf50', thinking:'#ffc107', typing:'#4caf50', tool:'#ff9800', agent:'#e040fb', done:'#4caf50' };
     const stateCol = statusColors[st] || '#4caf50';
 
-    // Draw PNG background
-    _drawBg(ctx, _pxImgAI, W, H);
+    // ══════════════════════════════════════════════════════════════════
+    //  STEP 1: Draw screen animations on blank canvas
+    // ══════════════════════════════════════════════════════════════════
 
-    // Scale factors (original image 855×1406)
-    const sx = W / 855, sy = H / 1406;
+    // Dark screen base
+    _rect(ctx, 0, 0, W, H, '#080810');
 
-    // Monitor regions (estimated from actual art):
-    // Top-left doc monitor:      50, 75  → 310, 285
-    // Top-center notes:          320, 75 → 530, 215
-    // Top-right concept board:   545, 60 → 820, 310  (has brain, neural connections, "prompt filtering")
-    // Mid-left code/graph:       50, 310 → 330, 520
-    // Brain icon area:           130,440 → 270, 530
-    // Main concept map monitor:  295,430 → 810, 710  (has "language","logic", gears, lightbulb, "text generate")
-    // Gear icon ~:               395,530 → 445, 580
-    // Lightbulb icon ~:          540,530 → 580, 570
-    // Color palette (right):     720,600 → 810, 700
+    // Neural network visualization — nodes and connections across all screens
+    const sx = W / 629, sy = H / 1024;
+    {
+        // Scattered nodes that will appear on whichever screens the mask reveals
+        const nodes = [];
+        for (let i = 0; i < 20; i++) {
+            nodes.push({
+                x: (50 + (i * 137 + 23) % 530) * sx,
+                y: (50 + (i * 89 + 17) % 450) * sy,
+            });
+        }
 
-    // ── Status LED — near "[WORKING]" ──
-    const ledOn = f % 10 < 7;
-    if (ledOn) {
+        // Connection lines
+        ctx.lineWidth = Math.max(1, Math.round(1.5 * sx));
+        for (let i = 0; i < nodes.length; i++) {
+            const j = (i + 1 + (i * 3) % 5) % nodes.length;
+            const pulseAlpha = isActive
+                ? 0.20 + Math.sin(f * 0.08 + i) * 0.10
+                : 0.06 + Math.sin(f * 0.03 + i) * 0.03;
+            ctx.globalAlpha = pulseAlpha;
+            ctx.strokeStyle = stateCol;
+            ctx.beginPath();
+            ctx.moveTo(nodes[i].x, nodes[i].y);
+            ctx.lineTo(nodes[j].x, nodes[j].y);
+            ctx.stroke();
+        }
+
+        // Nodes — pulsing circles
+        for (let i = 0; i < nodes.length; i++) {
+            const pulseOn = isActive ? ((f + i * 3) % 10) < 7 : ((f + i * 5) % 16) < 4;
+            if (pulseOn) {
+                ctx.globalAlpha = isActive ? 0.45 : 0.15;
+                ctx.fillStyle = stateCol;
+                ctx.beginPath();
+                ctx.arc(nodes[i].x, nodes[i].y, Math.round((isActive ? 8 : 5) * sx), 0, 6.28);
+                ctx.fill();
+                ctx.globalAlpha = isActive ? 0.6 : 0.2;
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(nodes[i].x, nodes[i].y, Math.round(3 * sx), 0, 6.28);
+                ctx.fill();
+            }
+        }
+
+        // Traveling data pulses
+        if (isActive) {
+            ctx.globalAlpha = 0.7;
+            for (let p = 0; p < 4; p++) {
+                const i = (f + p * 5) % nodes.length;
+                const j = (i + 1 + (i * 3) % 5) % nodes.length;
+                const t = ((f * 2 + p * 25) % 30) / 30;
+                const px = nodes[i].x + (nodes[j].x - nodes[i].x) * t;
+                const py = nodes[i].y + (nodes[j].y - nodes[i].y) * t;
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(px, py, Math.round(4 * sx), 0, 6.28);
+                ctx.fill();
+            }
+        }
+        ctx.globalAlpha = 1.0;
+    }
+
+    // Brain glow in the general center-left area (mask clips to correct screen)
+    {
+        const brainCx = W * 0.22, brainCy = H * 0.38;
+        const brainR = W * 0.08;
+        const brainAlpha = isActive
+            ? (st === 'thinking' ? 0.50 : st === 'agent' ? 0.40 : 0.25)
+            : 0.10;
+        const brainCol = st === 'thinking' ? '#ffc107' : st === 'agent' ? '#e040fb' : st === 'tool' ? '#ff9800' : '#ff4488';
+        const grad = ctx.createRadialGradient(brainCx, brainCy, 0, brainCx, brainCy, brainR * 3);
+        grad.addColorStop(0, brainCol);
+        grad.addColorStop(0.3, brainCol + '88');
+        grad.addColorStop(1, brainCol + '00');
+        ctx.globalAlpha = brainAlpha + Math.sin(f * 0.15) * 0.08;
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+        ctx.globalAlpha = 1.0;
+    }
+
+    // Scrolling text lines across all screens
+    {
+        const lineH = Math.max(Math.round(12 * sy), 2);
+        const txtColor = isActive ? (st === 'tool' ? '#ff9800' : st === 'agent' ? '#e040fb' : '#4fc3f7') : '#1a3a4a';
+        const scrollOff = (f * 3) % lineH;
+        for (let i = 0; i < 60; i++) {
+            const lineY = i * lineH - scrollOff;
+            if (lineY < 0 || lineY > H) continue;
+            ctx.globalAlpha = isActive ? 0.30 : 0.10;
+            ctx.fillStyle = txtColor;
+            const lw = Math.round((20 + ((i * 53 + 7) % 120)) * sx);
+            const lx = Math.round(((i * 97) % 400) * sx);
+            ctx.fillRect(lx, lineY, lw, Math.round(3 * sy));
+        }
+        ctx.globalAlpha = 1.0;
+    }
+
+    // Thinking spinner
+    if (st === 'thinking') {
+        ctx.globalAlpha = 0.5;
+        ctx.fillStyle = '#ffc107';
+        for (let i = 0; i < 5; i++) {
+            const angle = (f * 0.15 + i * (6.28 / 5)) % 6.28;
+            const cx = W * 0.5 + Math.cos(angle) * W * 0.08;
+            const cy = H * 0.42 + Math.sin(angle) * H * 0.04;
+            const size = i === (f % 5) ? 10 : 5;
+            ctx.fillRect(Math.round(cx), Math.round(cy), Math.round(size * sx), Math.round(size * sy));
+        }
+        ctx.globalAlpha = 1.0;
+    }
+
+    // State glow wash
+    if (isActive) {
+        ctx.globalAlpha = 0.06 + Math.sin(f * 0.12) * 0.02;
+        ctx.fillStyle = { thinking:'#ffc107', typing:'#4fc3f7', tool:'#ff9800', agent:'#e040fb', done:'#4caf50' }[st] || '#4fc3f7';
+        ctx.fillRect(0, 0, W, H);
+        ctx.globalAlpha = 1.0;
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    //  STEP 2: Mask — cut to green screen areas only
+    // ══════════════════════════════════════════════════════════════════
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(_pxAIMask.mask, 0, 0, W, H);
+
+    // ══════════════════════════════════════════════════════════════════
+    //  STEP 3: Draw clean image behind
+    // ══════════════════════════════════════════════════════════════════
+    ctx.globalCompositeOperation = 'destination-over';
+    ctx.drawImage(_pxAIMask.clean, 0, 0, W, H);
+
+    // Reset for overlays
+    ctx.globalCompositeOperation = 'source-over';
+
+    // ══════════════════════════════════════════════════════════════════
+    //  STEP 4: Non-screen overlays
+    // ══════════════════════════════════════════════════════════════════
+
+    // Status LED
+    if (f % 10 < 7) {
         ctx.fillStyle = stateCol;
         ctx.beginPath();
-        ctx.arc(Math.round(540 * sx), Math.round(48 * sy), Math.round(12 * sx), 0, 6.28);
+        ctx.arc(Math.round(395 * sx), Math.round(35 * sy), Math.round(8 * sx), 0, 6.28);
         ctx.fill();
         ctx.fillStyle = stateCol + '33';
         ctx.beginPath();
-        ctx.arc(Math.round(540 * sx), Math.round(48 * sy), Math.round(20 * sx), 0, 6.28);
+        ctx.arc(Math.round(395 * sx), Math.round(35 * sy), Math.round(14 * sx), 0, 6.28);
         ctx.fill();
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  MONITOR POLYGONS — angled corners matching the perspective art
-    //  Each array is [TL, TR, BR, BL] in original 855×1406 coords
-    // ═══════════════════════════════════════════════════════════════════════
-    const aiScreens = {
-        topLeftDoc:   [[48,72],  [295,80],  [290,278], [52,270]],    // Doc/tablet (slight angle)
-        topCenterNotes:[[318,72],[522,80],  [518,210], [322,205]],   // Notes panel
-        topRightBoard: [[548,58],[815,68],  [810,305], [545,295]],   // Concept board (angled right)
-        midLeftCode:   [[52,308],[325,318], [320,515], [55,505]],    // Code/graph + brain area
-        mainMonitor:   [[298,428],[808,438],[805,705], [300,695]],   // Big concept map
-    };
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  TOP-LEFT DOC MONITOR — scrolling document
-    // ═══════════════════════════════════════════════════════════════════════
-    {
-        _clipScreen(ctx, sx, sy, aiScreens.topLeftDoc, '#050510');
-        const lineH = Math.max(Math.round(16 * sy), 2);
-        const scrollOff = (f * 2) % lineH;
-        const docColor = isActive ? '#8ab4f8' : '#4a6a8a';
-        for (let i = 0; i < 16; i++) {
-            const lineY = Math.round(80 * sy) + i * lineH - scrollOff;
-            ctx.globalAlpha = isActive ? 0.45 : 0.25;
-            ctx.fillStyle = docColor;
-            const lineW = Math.round((60 + ((i * 47 + 13) % 160)) * sx);
-            ctx.fillRect(Math.round(60 * sx), lineY, Math.min(lineW, Math.round(240 * sx)), Math.round(4 * sy));
-            if (i % 5 === 0) {
-                ctx.globalAlpha = isActive ? 0.6 : 0.3;
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(Math.round(60 * sx), lineY, Math.round(120 * sx), Math.round(5 * sy));
-            }
-        }
-        const readY = Math.round((100 + (f * 3) % 170) * sy);
-        ctx.globalAlpha = 0.15;
-        ctx.fillStyle = isActive ? (statusColors[st] || '#4fc3f7') : '#334466';
-        ctx.fillRect(0, readY, W, lineH);
-        ctx.restore(); ctx.globalAlpha = 1.0;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  TOP-CENTER NOTES — bullet points
-    // ═══════════════════════════════════════════════════════════════════════
-    {
-        _clipScreen(ctx, sx, sy, aiScreens.topCenterNotes, '#050510');
-        const noteColor = isActive ? '#4fc3f7' : '#2a4a5a';
-        for (let i = 0; i < 6; i++) {
-            ctx.globalAlpha = isActive ? (0.35 + Math.sin(f * 0.1 + i) * 0.1) : 0.2;
-            ctx.fillStyle = isActive ? (statusColors[st] || noteColor) : '#3a5a6a';
-            ctx.beginPath();
-            ctx.arc(Math.round(335 * sx), Math.round((90 + i * 22) * sy), Math.round(3 * sx), 0, 6.28);
-            ctx.fill();
-            ctx.fillStyle = noteColor;
-            ctx.fillRect(Math.round(345 * sx), Math.round((87 + i * 22) * sy),
-                         Math.round((40 + (i * 31 % 120)) * sx), Math.round(4 * sy));
-        }
-        ctx.restore(); ctx.globalAlpha = 1.0;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  TOP-RIGHT CONCEPT BOARD — neural network
-    // ═══════════════════════════════════════════════════════════════════════
-    {
-        _clipScreen(ctx, sx, sy, aiScreens.topRightBoard, '#060612');
-        const nodes = [
-            { x: 610, y: 110 }, { x: 720, y: 95 },  { x: 790, y: 140 },
-            { x: 630, y: 190 }, { x: 730, y: 210 }, { x: 680, y: 270 },
-            { x: 580, y: 250 }, { x: 790, y: 250 },
-        ];
-        const connections = [[0,1],[1,2],[0,3],[1,4],[2,4],[3,4],[3,5],[4,5],[5,6],[4,7],[2,7],[0,6]];
-        ctx.strokeStyle = isActive ? stateCol : '#1a3a2a';
-        ctx.lineWidth = Math.max(1, Math.round(1.5 * sx));
-        for (const [a, b] of connections) {
-            ctx.globalAlpha = (isActive ? 0.22 : 0.12) + Math.sin(f * 0.06 + a + b) * 0.06;
-            ctx.beginPath();
-            ctx.moveTo(Math.round(nodes[a].x * sx), Math.round(nodes[a].y * sy));
-            ctx.lineTo(Math.round(nodes[b].x * sx), Math.round(nodes[b].y * sy));
-            ctx.stroke();
-        }
-        for (let i = 0; i < nodes.length; i++) {
-            const pulseOn = isActive ? ((f + i * 4) % 12) < 9 : ((f + i * 6) % 20) < 6;
-            ctx.globalAlpha = (isActive ? 0.5 : 0.2) * (0.7 + Math.sin(f * 0.15 + i * 1.2) * 0.3);
-            ctx.fillStyle = stateCol;
-            ctx.beginPath();
-            ctx.arc(Math.round(nodes[i].x * sx), Math.round(nodes[i].y * sy), Math.round((pulseOn ? 12 : 8) * sx), 0, 6.28);
-            ctx.fill();
-            ctx.fillStyle = '#ffffff'; ctx.globalAlpha *= 0.6;
-            ctx.beginPath();
-            ctx.arc(Math.round(nodes[i].x * sx), Math.round(nodes[i].y * sy), Math.round(4 * sx), 0, 6.28);
-            ctx.fill();
-        }
-        if (isActive) {
-            ctx.globalAlpha = 0.7;
-            for (let p = 0; p < 3; p++) {
-                const pair = connections[(f + p * 4) % connections.length];
-                const t = ((f * 2 + p * 30) % 30) / 30;
-                const px = nodes[pair[0]].x + (nodes[pair[1]].x - nodes[pair[0]].x) * t;
-                const py = nodes[pair[0]].y + (nodes[pair[1]].y - nodes[pair[0]].y) * t;
-                ctx.fillStyle = '#ffffff';
-                ctx.beginPath();
-                ctx.arc(Math.round(px * sx), Math.round(py * sy), Math.round(4 * sx), 0, 6.28);
-                ctx.fill();
-            }
-        }
-        ctx.restore(); ctx.globalAlpha = 1.0;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  MID-LEFT — Brain with neural sparks
-    // ═══════════════════════════════════════════════════════════════════════
-    {
-        _clipScreen(ctx, sx, sy, aiScreens.midLeftCode, '#050510');
-        const brainCx = Math.round(190 * sx), brainCy = Math.round(415 * sy);
-        const brainR = Math.round(55 * sx);
-        const brainAlpha = isActive
-            ? (st === 'thinking' ? 0.55 + Math.sin(f * 0.2) * 0.15
-               : st === 'agent' ? 0.45 + Math.sin(f * 0.15) * 0.12
-               : 0.35 + Math.sin(f * 0.1) * 0.08)
-            : 0.18 + Math.sin(f * 0.04) * 0.05;
-        const brainCol = st === 'thinking' ? '#ffc107' : st === 'agent' ? '#e040fb' : st === 'tool' ? '#ff9800' : '#ff4488';
-        // Outer glow
-        const grad = ctx.createRadialGradient(brainCx, brainCy, 0, brainCx, brainCy, brainR * 2.5);
-        grad.addColorStop(0, brainCol);
-        grad.addColorStop(0.3, brainCol + '88');
-        grad.addColorStop(0.6, brainCol + '33');
-        grad.addColorStop(1, brainCol + '00');
-        ctx.globalAlpha = brainAlpha;
-        ctx.fillStyle = grad;
-        ctx.fillRect(brainCx - brainR * 2.5, brainCy - brainR * 2.5, brainR * 5, brainR * 5);
-        // Brain hemispheres
-        ctx.globalAlpha = brainAlpha * 0.8;
-        ctx.fillStyle = brainCol;
-        ctx.beginPath();
-        ctx.arc(brainCx - Math.round(12 * sx), brainCy - Math.round(5 * sy), Math.round(28 * sx), 0, 6.28);
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(brainCx + Math.round(12 * sx), brainCy - Math.round(5 * sy), Math.round(28 * sx), 0, 6.28);
-        ctx.fill();
-        ctx.fillRect(Math.round(brainCx - 6 * sx), brainCy + Math.round(18 * sy), Math.round(12 * sx), Math.round(15 * sy));
-        // Core
-        ctx.globalAlpha = brainAlpha * 0.5;
+    // Pipe glow pulse
+    if (isActive) {
+        ctx.globalAlpha = 0.06 + Math.sin(f * 0.08) * 0.04;
+        ctx.fillStyle = stateCol;
+        ctx.fillRect(Math.round(95 * sx), Math.round(400 * sy), Math.round(15 * sx), Math.round(250 * sy));
+        ctx.globalAlpha = 0.4;
         ctx.fillStyle = '#ffffff';
-        ctx.beginPath();
-        ctx.arc(brainCx, brainCy - Math.round(4 * sy), Math.round(14 * sx), 0, 6.28);
-        ctx.fill();
-        // Neural folds
-        ctx.globalAlpha = brainAlpha * 0.6;
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = Math.max(1, Math.round(1.5 * sx));
-        for (let i = 0; i < 3; i++) {
-            const yOff = (-15 + i * 12) * sy;
-            ctx.beginPath();
-            ctx.moveTo(brainCx - Math.round(20 * sx), brainCy + Math.round(yOff));
-            ctx.quadraticCurveTo(brainCx, brainCy + Math.round(yOff) - Math.round(8 * sy),
-                                 brainCx + Math.round(20 * sx), brainCy + Math.round(yOff));
-            ctx.stroke();
-        }
-        // Sparks
-        if (isActive) {
-            const sparkCount = st === 'thinking' ? 8 : st === 'agent' ? 6 : 4;
-            for (let i = 0; i < sparkCount; i++) {
-                const angle = (f * 0.08 + i * (6.28 / sparkCount)) % 6.28;
-                const dist = brainR * (0.9 + Math.sin(f * 0.12 + i) * 0.5);
-                const spX = brainCx + Math.cos(angle) * dist;
-                const spY = brainCy + Math.sin(angle) * dist;
-                ctx.globalAlpha = 0.5;
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(Math.round(spX) - 1, Math.round(spY) - 1, Math.round(4 * sx), Math.round(4 * sy));
-                ctx.globalAlpha = 0.2;
-                ctx.strokeStyle = brainCol;
-                ctx.beginPath(); ctx.moveTo(brainCx, brainCy); ctx.lineTo(Math.round(spX), Math.round(spY)); ctx.stroke();
-            }
-        }
-        ctx.restore(); ctx.globalAlpha = 1.0;
+        ctx.fillRect(Math.round(98 * sx), Math.round((410 + (f * 6) % 240) * sy), Math.round(9 * sx), Math.round(6 * sy));
+        ctx.globalAlpha = 1.0;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  MAIN CONCEPT MAP — gear, lightbulb, text output, spinner
-    // ═══════════════════════════════════════════════════════════════════════
+    // Cyan arrow
     {
-        _clipScreen(ctx, sx, sy, aiScreens.mainMonitor, '#060612');
-
-        // Gear icon
-        const gearCx = Math.round(370 * sx), gearCy = Math.round(555 * sy);
-        const gearR = Math.round(28 * sx);
-        const rotSpeed = isActive ? (st === 'tool' ? 0.18 : 0.08) : 0.02;
-        ctx.globalAlpha = isActive ? 0.5 : 0.2;
-        for (let i = 0; i < 8; i++) {
-            const angle = f * rotSpeed + i * (6.28 / 8);
-            ctx.fillStyle = st === 'tool' ? '#ff9800' : (isActive ? stateCol : '#2a4a3a');
-            const tx1 = gearCx + Math.cos(angle - 0.15) * gearR * 0.6;
-            const ty1 = gearCy + Math.sin(angle - 0.15) * gearR * 0.6;
-            const tx2 = gearCx + Math.cos(angle) * gearR;
-            const ty2 = gearCy + Math.sin(angle) * gearR;
-            const tx3 = gearCx + Math.cos(angle + 0.15) * gearR * 0.6;
-            const ty3 = gearCy + Math.sin(angle + 0.15) * gearR * 0.6;
-            ctx.beginPath(); ctx.moveTo(tx1, ty1); ctx.lineTo(tx2, ty2); ctx.lineTo(tx3, ty3); ctx.fill();
-        }
-        ctx.beginPath(); ctx.arc(gearCx, gearCy, Math.round(16 * sx), 0, 6.28); ctx.fill();
-        ctx.globalAlpha = 1.0; ctx.fillStyle = '#0a0a14';
-        ctx.beginPath(); ctx.arc(gearCx, gearCy, Math.round(6 * sx), 0, 6.28); ctx.fill();
-
-        // Lightbulb
-        const bulbCx = Math.round(500 * sx), bulbCy = Math.round(530 * sy);
-        const bulbOn = st === 'done' || st === 'typing' || st === 'agent';
-        const bulbThink = st === 'thinking';
-        {
-            const bulbAlpha = bulbOn ? (0.55 + Math.sin(f * 0.1) * 0.15) : bulbThink ? (0.25 + Math.sin(f * 0.25) * 0.15) : 0.12;
-            const bulbCol = bulbOn ? '#ffeb3b' : bulbThink ? '#ffc107' : '#3a3a20';
-            const bGrad = ctx.createRadialGradient(bulbCx, bulbCy, 0, bulbCx, bulbCy, Math.round(45 * sx));
-            bGrad.addColorStop(0, bulbCol); bGrad.addColorStop(0.4, bulbCol + '66'); bGrad.addColorStop(1, bulbCol + '00');
-            ctx.globalAlpha = bulbAlpha; ctx.fillStyle = bGrad;
-            ctx.fillRect(bulbCx - Math.round(45 * sx), bulbCy - Math.round(45 * sy), Math.round(90 * sx), Math.round(90 * sy));
-            ctx.globalAlpha = bulbAlpha * 0.9; ctx.fillStyle = bulbCol;
-            ctx.beginPath(); ctx.arc(bulbCx, bulbCy - Math.round(6 * sy), Math.round(14 * sx), 0, 6.28); ctx.fill();
-            ctx.fillRect(bulbCx - Math.round(8 * sx), bulbCy + Math.round(6 * sy), Math.round(16 * sx), Math.round(10 * sy));
-            if (bulbOn || bulbThink) {
-                ctx.globalAlpha = (bulbThink && (f % 6 < 2)) ? 0.1 : 0.7;
-                ctx.fillStyle = '#ffffff';
-                ctx.beginPath(); ctx.arc(bulbCx, bulbCy - Math.round(6 * sy), Math.round(5 * sx), 0, 6.28); ctx.fill();
-            }
-        }
-
-        // Scrolling text
-        {
-            const lineH = Math.max(Math.round(14 * sy), 2);
-            const txtColor = isActive ? (st === 'tool' ? '#ff9800' : st === 'agent' ? '#e040fb' : '#4fc3f7') : '#1a3a4a';
-            const scrollOff = (f * 3) % lineH;
-            for (let i = 0; i < 18; i++) {
-                const lineY = Math.round(440 * sy) + i * lineH - scrollOff;
-                ctx.globalAlpha = isActive ? 0.4 : 0.15;
-                ctx.fillStyle = txtColor;
-                ctx.fillRect(Math.round(580 * sx), lineY,
-                             Math.min(Math.round((40 + ((i * 53 + 7) % 160)) * sx), Math.round(210 * sx)),
-                             Math.round(4 * sy));
-            }
-            if (f % 8 < 5) {
-                ctx.globalAlpha = 0.6; ctx.fillStyle = '#ffffff';
-                ctx.fillRect(Math.round(580 * sx), Math.round(690 * sy), Math.round(8 * sx), Math.round(10 * sy));
-            }
-        }
-
-        // Thinking spinner
-        if (st === 'thinking') {
-            ctx.globalAlpha = 0.45; ctx.fillStyle = '#ffc107';
-            for (let i = 0; i < 5; i++) {
-                const angle = (f * 0.15 + i * (6.28 / 5)) % 6.28;
-                ctx.fillRect(Math.round((500 + Math.cos(angle) * 55) * sx),
-                             Math.round((610 + Math.sin(angle) * 35) * sy),
-                             Math.round((i === (f % 5) ? 10 : 5) * sx), Math.round((i === (f % 5) ? 10 : 5) * sy));
-            }
-        }
-        ctx.restore(); ctx.globalAlpha = 1.0;
+        ctx.globalAlpha = Math.max(0, 0.06 + Math.sin(f * 0.12) * 0.04);
+        ctx.fillStyle = '#00e5ff';
+        ctx.fillRect(Math.round(15 * sx), Math.round(415 * sy), Math.round(38 * sx), Math.round(45 * sy));
+        ctx.globalAlpha = 1.0;
     }
 
-    // ═══════════════════════════════════════════════════════════════════════
-    //  COLOR PALETTE — cycling dots
-    // ═══════════════════════════════════════════════════════════════════════
+    // Color palette dots
     {
-        const palColors = ['#ff4444','#ff9800','#ffeb3b','#4caf50','#4fc3f7','#e040fb','#ffffff','#ff6ec7'];
+        const palColors = ['#ff4444','#ff9800','#ffeb3b','#4caf50','#4fc3f7','#e040fb','#ffffff'];
         for (let i = 0; i < palColors.length; i++) {
             const on = isActive ? (((f + i * 2) % 10) < 7) : (((f + i * 3) % 16) < 5);
             if (on) {
-                ctx.globalAlpha = isActive ? (0.40 + Math.sin(f * 0.12 + i) * 0.15) : 0.15;
+                ctx.globalAlpha = isActive ? 0.30 : 0.12;
                 ctx.fillStyle = palColors[i];
                 ctx.beginPath();
-                ctx.arc(Math.round((728 + (i % 4) * 22) * sx), Math.round((618 + Math.floor(i / 4) * 22) * sy),
-                        Math.round(7 * sx), 0, 6.28);
+                ctx.arc(Math.round((530 + (i % 4) * 16) * sx), Math.round((450 + Math.floor(i / 4) * 16) * sy),
+                        Math.round(5 * sx), 0, 6.28);
                 ctx.fill();
             }
         }
-        ctx.globalAlpha = 1.0;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    //  LEFT SIDE — pipe glow, server LEDs, cyan arrow
-    // ═══════════════════════════════════════════════════════════════════════
-    // Pipe/cable glow pulse
-    if (isActive) {
-        // Animate a pulse traveling down the pipes
-        const pipeGlow = 0.06 + Math.sin(f * 0.08) * 0.04;
-        ctx.globalAlpha = pipeGlow;
-        ctx.fillStyle = stateCol;
-        ctx.fillRect(Math.round(130 * sx), Math.round(550 * sy), Math.round(20 * sx), Math.round(350 * sy));
-        // Pulse dot traveling down the pipe
-        ctx.globalAlpha = 0.4;
-        const pipeDotY = Math.round((560 + (f * 8) % 330) * sy);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(Math.round(134 * sx), pipeDotY, Math.round(12 * sx), Math.round(8 * sy));
-        ctx.globalAlpha = 1.0;
-    }
-
-    // Cyan arrow glow
-    {
-        const arrAlpha = 0.06 + Math.sin(f * 0.12) * 0.04;
-        ctx.globalAlpha = Math.max(0, arrAlpha);
-        ctx.fillStyle = '#00e5ff';
-        ctx.fillRect(Math.round(20 * sx), Math.round(570 * sy), Math.round(50 * sx), Math.round(60 * sy));
         ctx.globalAlpha = 1.0;
     }
 
     // Server rack LEDs
     for (let i = 0; i < 8; i++) {
         const rate = isActive ? (st === 'tool' ? 12 : 8) : 3;
-        const l1 = ((f + i * 5) % 16) < rate;
-        const l2 = ((f + i * 7 + 3) % 14) < rate;
-        if (l1) {
+        if (((f + i * 5) % 16) < rate) {
             ctx.fillStyle = stateCol;
-            ctx.fillRect(Math.round(68 * sx), Math.round((750 + i * 32) * sy), Math.round(8 * sx), Math.round(8 * sy));
+            ctx.fillRect(Math.round(50 * sx), Math.round((545 + i * 24) * sy), Math.round(6 * sx), Math.round(6 * sy));
         }
-        if (l2) {
+        if (((f + i * 7 + 3) % 14) < rate) {
             ctx.fillStyle = stateCol + 'aa';
-            ctx.fillRect(Math.round(90 * sx), Math.round((750 + i * 32) * sy), Math.round(8 * sx), Math.round(8 * sy));
+            ctx.fillRect(Math.round(66 * sx), Math.round((545 + i * 24) * sy), Math.round(6 * sx), Math.round(6 * sy));
         }
     }
 
-    // Bottom equipment LEDs
+    // Bottom LEDs
     for (let i = 0; i < 4; i++) {
-        const on = ((f + i * 6) % 18) < (isActive ? 12 : 4);
-        if (on) {
+        if (((f + i * 6) % 18) < (isActive ? 12 : 4)) {
             ctx.fillStyle = i % 2 === 0 ? '#4caf50' : stateCol;
-            ctx.fillRect(Math.round((100 + i * 50) * sx), Math.round(1240 * sy), Math.round(6 * sx), Math.round(6 * sy));
+            ctx.fillRect(Math.round((75 + i * 38) * sx), Math.round(905 * sy), Math.round(4 * sx), Math.round(4 * sy));
         }
     }
 
-    // ── Character breathing ──
+    // Character breathing
     if (st === 'idle') {
-        const breathAlpha = 0.02 + Math.sin(f * 0.05) * 0.01;
-        ctx.globalAlpha = Math.max(0, breathAlpha);
+        ctx.globalAlpha = Math.max(0, 0.02 + Math.sin(f * 0.05) * 0.01);
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(Math.round(280 * sx), Math.round(820 * sy), Math.round(300 * sx), Math.round(280 * sy));
+        ctx.fillRect(Math.round(200 * sx), Math.round(598 * sy), Math.round(220 * sx), Math.round(200 * sy));
         ctx.globalAlpha = 1.0;
     }
 }
@@ -4874,7 +4647,7 @@ select.mc-input { cursor: pointer; }
 .mc-pixel-stage { display: flex; align-items: center; justify-content: center; gap: 0; position: relative; border-radius: 8px; border: 1px solid #1a1a24; overflow: hidden; background: #080810; }
 .mc-pixel-stage::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.06) 3px, rgba(0,0,0,0.06) 6px); z-index: 10; mix-blend-mode: multiply; border-radius: 8px; }
 .mc-pixel-desk { flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; z-index: 1; min-width: 0; overflow: hidden; }
-.mc-pixel-canvas { width: 100%; aspect-ratio: 428 / 703; image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+.mc-pixel-canvas { width: 100%; aspect-ratio: 629 / 1024; image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
 
 /* Hub / connection center */
 .mc-pixel-hub { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 80px; flex-shrink: 0; z-index: 5; position: relative; }
