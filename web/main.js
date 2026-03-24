@@ -102,7 +102,7 @@ let _pixelIdleTimer = null;
 let _pixelFrame = 0;
 let _pixelAnimTimer = null;
 let _offUser = null, _offAI = null; // offscreen canvases for crisp pixel art
-const _GW = 160, _GH = 260;        // game resolution (scaled up to display)
+const _GW = 320, _GH = 520;        // game resolution (scaled up to display)
 
 // ─── Launcher init ───────────────────────────────────────────────────────────
 
@@ -829,7 +829,7 @@ function _buildLayout() {
             <div class="mc-pixel-section" id="mc-pixel-section">
                 <div class="mc-pixel-stage">
                     <div class="mc-pixel-desk">
-                        <canvas class="mc-pixel-canvas" id="mc-px-user-cv" width="315" height="512"></canvas>
+                        <canvas class="mc-pixel-canvas" id="mc-px-user-cv" width="320" height="520"></canvas>
                     </div>
                     <div class="mc-pixel-hub">
                         <div class="mc-pixel-hub-core" id="mc-pixel-hub">
@@ -845,7 +845,7 @@ function _buildLayout() {
                         <div class="mc-pixel-status" id="mc-pixel-status">IDLE</div>
                     </div>
                     <div class="mc-pixel-desk">
-                        <canvas class="mc-pixel-canvas" id="mc-px-ai-cv" width="315" height="512"></canvas>
+                        <canvas class="mc-pixel-canvas" id="mc-px-ai-cv" width="320" height="520"></canvas>
                     </div>
                 </div>
             </div>
@@ -2430,8 +2430,8 @@ function _r(c, x, y, w, h, col) { c.fillStyle = col; c.fillRect(x, y, w, h); }
 
 function _syncCanvasSize(cv) {
     const rect = cv.getBoundingClientRect();
-    const dw = Math.round(rect.width) || 315;
-    const dh = Math.round(rect.height) || 512;
+    const dw = Math.round(rect.width) || 320;
+    const dh = Math.round(rect.height) || 520;
     if (cv.width !== dw || cv.height !== dh) { cv.width = dw; cv.height = dh; }
 }
 function _renderPixelScenes() { _renderUserCanvas(); _renderAICanvas(); }
@@ -2444,13 +2444,13 @@ function _stLabel(st) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   Procedural 16-Bit Pixel Art Engine
-   Draws entire scenes on small offscreen canvases (160×260 game pixels),
-   then blits to display with nearest-neighbor scaling for crisp retro look.
+   Procedural Pixel Art Engine
+   Draws entire scenes on offscreen canvases (320×520 game pixels),
+   then blits to display with smooth scaling.
    ══════════════════════════════════════════════════════════════════════════════ */
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   CODER AGENT — Procedural 16-bit pixel art scene
+   CODER AGENT — Procedural pixel art scene
    ══════════════════════════════════════════════════════════════════════════════ */
 
 function _renderUserCanvas() {
@@ -2464,337 +2464,460 @@ function _renderUserCanvas() {
     const sc = _stCol(st);
     c.clearRect(0, 0, _GW, _GH);
 
-    // ── Room background ──
-    _r(c, 0, 0, 160, 260, '#0c0e18');
-    _r(c, 0, 12, 160, 108, '#161830');
-    for (let i = 0; i < 9; i++) _r(c, 17, 18 + i * 12, 126, 1, '#1c1e34');
-    _r(c, 16, 12, 1, 108, '#1e2038');
-    _r(c, 143, 12, 1, 108, '#1e2038');
+    // ── Room background gradient ──
+    {
+        const bg = c.createLinearGradient(0, 24, 0, 240);
+        bg.addColorStop(0, '#161830');
+        bg.addColorStop(1, '#0c0e18');
+        c.fillStyle = bg;
+        c.fillRect(0, 24, 320, 216);
+    }
+    _r(c, 0, 0, 320, 24, '#0c0e18');
+    // Subtle horizontal texture lines on wall
+    for (let i = 0; i < 18; i++) _r(c, 30, 30 + i * 12, 260, 1, '#1c1e34');
+    // Wall side borders
+    _r(c, 28, 24, 2, 216, '#1e2038');
+    _r(c, 290, 24, 2, 216, '#1e2038');
 
     // ── Server rack LEFT ──
-    _r(c, 1, 36, 14, 208, '#1a1c26');
-    _r(c, 0, 36, 1, 208, '#262a36');
-    _r(c, 15, 36, 1, 208, '#262a36');
-    for (let i = 0; i < 11; i++) {
-        const y = 40 + i * 18;
-        _r(c, 3, y, 10, 14, '#242630');
-        _r(c, 3, y, 10, 1, '#363a48');
-        _r(c, 4, y + 3, 8, 8, '#1a1c26');
-        if ((f + i * 3) % 14 < (act ? 9 : 3)) _r(c, 5, y + 5, 2, 2, act ? sc : '#4caf50');
-        if ((f + i * 5 + 7) % 16 < (act ? 8 : 2)) _r(c, 9, y + 5, 2, 2, '#4caf50');
+    _r(c, 0, 70, 28, 370, '#1a1c26');
+    _r(c, 0, 70, 2, 370, '#262a36');
+    _r(c, 26, 70, 2, 370, '#262a36');
+    _r(c, 0, 70, 28, 2, '#363a48');
+    for (let i = 0; i < 14; i++) {
+        const y = 78 + i * 25;
+        _r(c, 3, y, 22, 20, '#242630');
+        _r(c, 3, y, 22, 2, '#363a48');
+        _r(c, 5, y + 4, 18, 12, '#1a1c26');
+        // LEDs
+        if ((f + i * 3) % 14 < (act ? 9 : 3)) {
+            _r(c, 7, y + 7, 4, 4, act ? sc : '#4caf50');
+            c.globalAlpha = 0.3; _r(c, 6, y + 6, 6, 6, act ? sc : '#4caf50'); c.globalAlpha = 1;
+        }
+        if ((f + i * 5 + 7) % 16 < (act ? 8 : 2)) _r(c, 15, y + 7, 4, 4, '#4caf50');
+        if ((f + i * 7 + 3) % 18 < (act ? 10 : 2)) _r(c, 21, y + 7, 3, 3, '#ff9800');
     }
 
     // ── Server rack RIGHT ──
-    _r(c, 145, 36, 14, 208, '#1a1c26');
-    _r(c, 144, 36, 1, 208, '#262a36');
-    _r(c, 159, 36, 1, 208, '#262a36');
-    for (let i = 0; i < 11; i++) {
-        const y = 40 + i * 18;
-        _r(c, 147, y, 10, 14, '#242630');
-        _r(c, 147, y, 10, 1, '#363a48');
-        _r(c, 148, y + 3, 8, 8, '#1a1c26');
-        if ((f + i * 4 + 2) % 15 < (act ? 9 : 3)) _r(c, 149, y + 5, 2, 2, act ? sc : '#4caf50');
-        if ((f + i * 6 + 5) % 13 < (act ? 7 : 2)) _r(c, 153, y + 5, 2, 2, '#4caf50');
+    _r(c, 292, 70, 28, 370, '#1a1c26');
+    _r(c, 292, 70, 2, 370, '#262a36');
+    _r(c, 318, 70, 2, 370, '#262a36');
+    _r(c, 292, 70, 28, 2, '#363a48');
+    for (let i = 0; i < 14; i++) {
+        const y = 78 + i * 25;
+        _r(c, 295, y, 22, 20, '#242630');
+        _r(c, 295, y, 22, 2, '#363a48');
+        _r(c, 297, y + 4, 18, 12, '#1a1c26');
+        if ((f + i * 4 + 2) % 15 < (act ? 9 : 3)) {
+            _r(c, 299, y + 7, 4, 4, act ? sc : '#4caf50');
+            c.globalAlpha = 0.3; _r(c, 298, y + 6, 6, 6, act ? sc : '#4caf50'); c.globalAlpha = 1;
+        }
+        if ((f + i * 6 + 5) % 13 < (act ? 7 : 2)) _r(c, 307, y + 7, 4, 4, '#4caf50');
+        if ((f + i * 8 + 1) % 17 < (act ? 9 : 2)) _r(c, 313, y + 7, 3, 3, '#ff9800');
     }
 
-    // ── Monitor shelf ──
-    _r(c, 18, 26, 124, 3, '#363a48');
-    _r(c, 18, 26, 124, 1, '#444860');
+    // ── Shelf on wall ──
+    _r(c, 32, 26, 90, 4, '#363a48');
+    _r(c, 32, 26, 90, 2, '#444860');
+    // Plant on shelf
+    _r(c, 42, 16, 8, 10, '#3a7a3a');
+    _r(c, 40, 18, 4, 6, '#2a6a2a');
+    _r(c, 50, 20, 4, 4, '#4a8a4a');
+    _r(c, 44, 26, 8, 2, '#6a4a2a');
+    // Figurine on shelf
+    _r(c, 68, 18, 6, 8, '#c586c0');
+    _r(c, 66, 22, 10, 4, '#9a68a0');
+    // Book
+    _r(c, 84, 14, 12, 12, '#569cd6');
+    _r(c, 86, 15, 8, 10, '#3a6a9a');
+    _r(c, 84, 14, 2, 12, '#4a7abc');
+
+    // LED strip under shelf — pulses with state color
+    {
+        const pulse = act ? 0.5 + Math.sin(f * 0.2) * 0.3 : 0.15;
+        c.globalAlpha = pulse;
+        _r(c, 34, 30, 86, 2, act ? sc : '#4a4a6a');
+        c.globalAlpha = pulse * 0.4;
+        _r(c, 34, 32, 86, 4, act ? sc : '#2a2a4a');
+        c.globalAlpha = 1;
+    }
+
+    // ── Picture frame on wall ──
+    _r(c, 200, 30, 44, 32, '#2a2e38');
+    _r(c, 202, 32, 40, 28, '#1a3a5a');
+    _r(c, 204, 34, 36, 24, '#0e2848');
+    // Abstract art inside
+    _r(c, 210, 38, 12, 8, '#e040fb');
+    _r(c, 218, 42, 8, 12, '#4fc3f7');
+    _r(c, 226, 36, 10, 10, '#ffc107');
 
     // ── Left monitor ──
-    _r(c, 22, 30, 50, 38, '#16181e');
-    _r(c, 22, 30, 50, 1, '#2a2e38');
-    _r(c, 22, 30, 1, 38, '#2a2e38');
-    _r(c, 24, 32, 46, 34, '#060a14');
-    // Monitor stand
-    _r(c, 44, 68, 8, 4, '#2a2e38');
-    _r(c, 40, 72, 16, 2, '#363a48');
+    _r(c, 44, 56, 48, 40, '#16181e');
+    _r(c, 44, 56, 48, 2, '#2a2e38');
+    _r(c, 44, 56, 2, 40, '#2a2e38');
+    _r(c, 46, 58, 44, 36, '#060a14');
+    // Stand
+    _r(c, 64, 96, 8, 6, '#2a2e38');
+    _r(c, 58, 102, 20, 3, '#363a48');
+
+    // ── Center/main monitor ──
+    _r(c, 108, 46, 108, 60, '#16181e');
+    _r(c, 108, 46, 108, 2, '#2a2e38');
+    _r(c, 108, 46, 2, 60, '#2a2e38');
+    _r(c, 110, 48, 104, 56, '#060a14');
+    // Stand
+    _r(c, 156, 106, 12, 8, '#2a2e38');
+    _r(c, 146, 114, 32, 3, '#363a48');
 
     // ── Right monitor ──
-    _r(c, 88, 30, 50, 38, '#16181e');
-    _r(c, 88, 30, 50, 1, '#2a2e38');
-    _r(c, 88, 30, 1, 38, '#2a2e38');
-    _r(c, 90, 32, 46, 34, '#060a14');
-    _r(c, 110, 68, 8, 4, '#2a2e38');
-    _r(c, 106, 72, 16, 2, '#363a48');
+    _r(c, 232, 56, 48, 40, '#16181e');
+    _r(c, 232, 56, 48, 2, '#2a2e38');
+    _r(c, 232, 56, 2, 40, '#2a2e38');
+    _r(c, 234, 58, 44, 36, '#060a14');
+    // Stand
+    _r(c, 252, 96, 8, 6, '#2a2e38');
+    _r(c, 246, 102, 20, 3, '#363a48');
 
-    // ── Side monitor (on articulating arm) ──
-    _r(c, 141, 64, 2, 16, '#363a48');
-    _r(c, 139, 62, 6, 2, '#2a2e38');
-    _r(c, 110, 76, 38, 30, '#16181e');
-    _r(c, 110, 76, 38, 1, '#2a2e38');
-    _r(c, 110, 76, 1, 30, '#2a2e38');
-    _r(c, 112, 78, 34, 26, '#060a14');
-
-    // ── Screen content: Left monitor — Code editor ──
+    // ── Screen content: Left monitor — File explorer ──
     {
-        c.save(); c.beginPath(); c.rect(24, 32, 46, 34); c.clip();
+        c.save(); c.beginPath(); c.rect(46, 58, 44, 36); c.clip();
+        _r(c, 46, 58, 44, 36, '#1e2028');
+        const spd = act ? 2 : 0.5;
+        const lH = 5, scroll = Math.floor(f * spd) % lH;
+        for (let i = 0; i < 10; i++) {
+            const ly = 58 + i * lH - scroll;
+            if (ly < 54 || ly > 94) continue;
+            const s = i * 23 + 5;
+            const indent = (s % 3) * 6;
+            const isSelected = act && (i === 3);
+            if (isSelected) { c.globalAlpha = 0.2; _r(c, 46, ly, 44, lH, '#569cd6'); }
+            c.globalAlpha = act ? 0.65 : 0.3;
+            // Folder/file icon
+            _r(c, 48 + indent, ly + 1, 3, 3, (s % 4 === 0) ? '#dcdcaa' : '#569cd6');
+            // File name bar
+            _r(c, 53 + indent, ly + 1, 8 + (s % 12), 3, (s % 4 === 0) ? '#9a8a6a' : '#6a7a8a');
+        }
+        c.globalAlpha = 1; c.restore();
+    }
+
+    // ── Screen content: Center monitor — Code editor ──
+    {
+        c.save(); c.beginPath(); c.rect(110, 48, 104, 56); c.clip();
+        _r(c, 110, 48, 104, 56, '#1a1e28');
         const spd = act ? 3 : 1;
-        const lH = 3, scroll = (f * spd) % lH;
+        const lH = 5, scroll = (f * spd) % lH;
         const syn = ['#569cd6','#ce9178','#dcdcaa','#c586c0','#9cdcfe','#4ec9b0','#d4d4d4'];
         for (let i = 0; i < 14; i++) {
-            const ly = 32 + i * lH - scroll;
-            if (ly < 28 || ly > 66) continue;
+            const ly = 48 + i * lH - scroll;
+            if (ly < 44 || ly > 104) continue;
             const s = i * 31 + 7;
-            c.globalAlpha = act ? 0.3 : 0.15;
-            _r(c, 25, ly, 3, 2, '#636369');
-            c.globalAlpha = act ? 0.75 : 0.35;
-            let xp = 29 + (s % 3) * 3;
-            for (let t = 0; t < 2 + (s % 3); t++) {
-                const tw = 4 + ((s + t * 13) % 12);
-                _r(c, xp, ly, tw, 2, syn[(s + t) % syn.length]);
-                xp += tw + 2;
-                if (xp > 66) break;
+            // Active line highlight
+            if (act && i === 5) { c.globalAlpha = 0.08; _r(c, 110, ly, 104, lH, '#fff'); }
+            // Line numbers
+            c.globalAlpha = act ? 0.35 : 0.18;
+            _r(c, 112, ly + 1, 6, 3, '#636369');
+            // Code tokens
+            c.globalAlpha = act ? 0.8 : 0.4;
+            let xp = 122 + (s % 3) * 4;
+            for (let t = 0; t < 3 + (s % 3); t++) {
+                const tw = 6 + ((s + t * 13) % 18);
+                _r(c, xp, ly + 1, tw, 3, syn[(s + t) % syn.length]);
+                xp += tw + 3;
+                if (xp > 210) break;
             }
         }
-        if (act && f % 6 < 4) { c.globalAlpha = 0.9; _r(c, 36, 44, 1, 3, '#aeafad'); }
+        // Blinking cursor
+        if (act && f % 6 < 4) { c.globalAlpha = 0.9; _r(c, 140, 73, 2, 4, '#aeafad'); }
+        // Tool progress bar
+        if (st === 'tool') {
+            const pg = ((f * 4) % 80) / 80;
+            _r(c, 112, 98, 100, 4, '#1a1c2a');
+            _r(c, 112, 98, Math.round(100 * pg), 4, sc);
+            _r(c, 112, 98, Math.round(100 * pg), 1, '#fff');
+        }
         c.globalAlpha = 1; c.restore();
     }
 
     // ── Screen content: Right monitor — Terminal ──
     {
-        c.save(); c.beginPath(); c.rect(90, 32, 46, 34); c.clip();
-        _r(c, 90, 32, 46, 34, '#080e08');
-        const spd = act ? 2 : 1, lH = 3, scroll = (f * spd) % lH;
-        for (let i = 0; i < 14; i++) {
-            const ly = 32 + i * lH - scroll;
-            if (ly < 28 || ly > 66) continue;
+        c.save(); c.beginPath(); c.rect(234, 58, 44, 36); c.clip();
+        _r(c, 234, 58, 44, 36, '#080e08');
+        const spd = act ? 2 : 1, lH = 5, scroll = (f * spd) % lH;
+        for (let i = 0; i < 10; i++) {
+            const ly = 58 + i * lH - scroll;
+            if (ly < 54 || ly > 94) continue;
             const s = i * 43 + 11;
-            c.globalAlpha = act ? 0.6 : 0.25;
-            _r(c, 92, ly, 3, 2, '#4ec9b0');
+            c.globalAlpha = act ? 0.65 : 0.3;
+            // Prompt marker
+            _r(c, 236, ly + 1, 4, 3, '#4ec9b0');
+            // Text content
             const isErr = (s % 15) === 0;
-            _r(c, 96, ly, 6 + (s % 30), 2, isErr ? '#f44747' : '#4af626');
+            const isWarn = (s % 11) === 0;
+            const col = isErr ? '#f44747' : isWarn ? '#cca700' : '#4af626';
+            _r(c, 242, ly + 1, 8 + (s % 28), 3, col);
         }
-        // Cursor
-        if (act && f % 4 < 3) { c.globalAlpha = 0.8; _r(c, 92, 32 + 30, 4, 2, '#4af626'); }
+        // Blinking cursor block
+        if (act && f % 4 < 3) { c.globalAlpha = 0.8; _r(c, 236, 58 + 28, 6, 4, '#4af626'); }
         c.globalAlpha = 1; c.restore();
-    }
-
-    // ── Screen content: Side monitor — Debug graphs ──
-    {
-        c.save(); c.beginPath(); c.rect(112, 78, 34, 26); c.clip();
-        for (let i = 0; i < 8; i++) {
-            const amp = act
-                ? 0.3 + Math.sin(f * 0.12 + i * 0.8) * 0.3 + Math.cos(f * 0.07 + i * 0.5) * 0.2
-                : 0.1 + Math.sin(f * 0.03 + i * 0.6) * 0.08;
-            const bh = Math.max(2, Math.round(Math.max(0.05, amp) * 18));
-            const bx = 114 + i * 4, by = 100 - bh;
-            const hue = amp > 0.6 ? '#f44747' : amp > 0.3 ? '#cca700' : '#4ec9b0';
-            c.globalAlpha = act ? 0.7 : 0.3;
-            _r(c, bx, by, 3, bh, hue);
-            c.globalAlpha = act ? 0.9 : 0.4;
-            _r(c, bx, by, 3, 1, '#fff');
-        }
-        c.globalAlpha = 0.15; _r(c, 114, 100, 30, 1, '#555'); c.globalAlpha = 1;
-        c.restore();
     }
 
     // ── CRT scan lines on monitors ──
     {
-        const scanF = (f * 3) % 40;
-        c.globalAlpha = 0.07;
-        _r(c, 24, 32 + (scanF % 34), 46, 1, '#fff');
-        _r(c, 90, 32 + (scanF % 34), 46, 1, '#fff');
-        _r(c, 112, 78 + (scanF % 26), 34, 1, '#fff');
+        const scanF = (f * 3) % 60;
+        c.globalAlpha = 0.06;
+        _r(c, 46, 58 + (scanF % 36), 44, 1, '#fff');
+        _r(c, 110, 48 + (scanF % 56), 104, 1, '#fff');
+        _r(c, 234, 58 + (scanF % 36), 44, 1, '#fff');
         c.globalAlpha = 1;
     }
 
     // ── Monitor glow on wall ──
     if (act) {
         c.globalAlpha = 0.04;
-        _r(c, 20, 16, 56, 12, sc);
-        _r(c, 86, 16, 56, 12, sc);
-        c.globalAlpha = 1;
-    }
-
-    // ── Cyan arrow indicator (right wall) ──
-    {
-        const glow = 0.5 + Math.sin(f * 0.15) * 0.2;
-        c.globalAlpha = glow;
-        _r(c, 148, 88, 6, 8, '#00e5ff');
-        _r(c, 146, 90, 3, 4, '#00e5ff');
-        _r(c, 154, 90, 3, 4, '#00e5ff');
-        c.globalAlpha = glow * 0.3;
-        _r(c, 144, 86, 14, 12, '#00e5ff');
+        _r(c, 40, 30, 56, 20, sc);
+        _r(c, 104, 24, 116, 20, sc);
+        _r(c, 228, 30, 56, 20, sc);
         c.globalAlpha = 1;
     }
 
     // ── Desk ──
-    _r(c, 17, 112, 126, 2, '#8a7650');
-    _r(c, 17, 112, 126, 1, '#9a8660');
-    _r(c, 17, 114, 126, 18, '#5a4830');
-    _r(c, 17, 131, 126, 1, '#4a3c26');
-    _r(c, 30, 122, 8, 2, '#363a48');
-    _r(c, 122, 122, 8, 2, '#363a48');
+    _r(c, 30, 240, 260, 4, '#8a7650');
+    _r(c, 30, 240, 260, 2, '#9a8660');
+    _r(c, 30, 244, 260, 32, '#5a4830');
+    _r(c, 30, 275, 260, 2, '#4a3c26');
+    // Drawer handles
+    _r(c, 60, 256, 14, 3, '#363a48');
+    _r(c, 246, 256, 14, 3, '#363a48');
     // Desk legs
-    _r(c, 20, 132, 3, 36, '#4a3c26');
-    _r(c, 137, 132, 3, 36, '#4a3c26');
+    _r(c, 36, 277, 6, 60, '#4a3c26');
+    _r(c, 278, 277, 6, 60, '#4a3c26');
 
-    // ── Keyboard left ──
-    _r(c, 32, 113, 22, 5, '#26262e');
-    _r(c, 32, 113, 22, 1, '#3a3a44');
-    for (let kx = 0; kx < 5; kx++) for (let ky = 0; ky < 2; ky++)
-        _r(c, 34 + kx * 4, 114 + ky * 2, 3, 1, '#404050');
+    // ── Keyboard ──
+    _r(c, 100, 241, 56, 10, '#26262e');
+    _r(c, 100, 241, 56, 2, '#3a3a44');
+    for (let kx = 0; kx < 10; kx++) for (let ky = 0; ky < 3; ky++)
+        _r(c, 103 + kx * 5, 243 + ky * 3, 4, 2, '#404050');
+    // RGB underglow
+    if (act) {
+        const glowPulse = 0.15 + Math.sin(f * 0.15) * 0.1;
+        c.globalAlpha = glowPulse;
+        _r(c, 98, 251, 60, 3, sc);
+        c.globalAlpha = 1;
+    }
 
-    // ── Keyboard right (main) ──
-    _r(c, 64, 113, 30, 6, '#26262e');
-    _r(c, 64, 113, 30, 1, '#3a3a44');
-    for (let kx = 0; kx < 6; kx++) for (let ky = 0; ky < 2; ky++)
-        _r(c, 66 + kx * 4, 114 + ky * 2, 3, 1, '#404050');
+    // ── Mouse on mousepad ──
+    _r(c, 168, 242, 20, 14, '#1a1a24'); // mousepad
+    _r(c, 174, 243, 8, 10, '#2a2a34');
+    _r(c, 176, 243, 4, 4, '#3a3a44');
 
-    // ── Mouse ──
-    _r(c, 98, 114, 4, 5, '#2a2a34');
-    _r(c, 99, 114, 2, 2, '#3a3a44');
+    // ── Coffee mug (right side) ──
+    _r(c, 42, 228, 10, 12, '#8b6e4e');
+    _r(c, 51, 232, 5, 6, '#8b6e4e');
+    _r(c, 53, 233, 3, 2, '#0c0e18');
+    _r(c, 42, 228, 10, 2, '#aaa');
+    _r(c, 44, 228, 6, 2, '#6b4422');
+    // Steam wisps
+    if (f % 20 < 14) {
+        c.globalAlpha = 0.3;
+        _r(c, 44 + (f % 3), 222 - (f % 6), 3, 3, '#fff');
+        _r(c, 48 - (f % 2), 218 - (f % 5), 2, 3, '#fff');
+        _r(c, 46 + ((f + 2) % 3), 214 - (f % 4), 2, 2, '#fff');
+        c.globalAlpha = 1;
+    }
 
     // ── Phone/tablet ──
-    _r(c, 106, 113, 8, 5, '#1a1a24');
-    _r(c, 107, 114, 6, 3, '#2a3a50');
+    _r(c, 202, 241, 14, 8, '#1a1a24');
+    _r(c, 204, 242, 10, 6, '#2a3a50');
+    // Faint screen glow
+    c.globalAlpha = 0.1; _r(c, 204, 242, 10, 6, '#4fc3f7'); c.globalAlpha = 1;
 
-    // ── Joystick ──
-    _r(c, 118, 113, 4, 3, '#2a2a34');
-    _r(c, 119, 110, 2, 4, '#3a3a4a');
-    _r(c, 118, 109, 4, 2, '#e04040');
+    // ── Energy drink can ──
+    _r(c, 226, 232, 8, 14, '#1a4a1a');
+    _r(c, 226, 232, 8, 3, '#c0c0c0');
+    _r(c, 228, 236, 4, 6, '#4caf50');
+    _r(c, 227, 238, 6, 2, '#ffc107');
+
+    // ── Sleeping cat on desk ──
+    {
+        const catX = 62, catY = 231;
+        // Body (curled up oval)
+        _r(c, catX, catY + 2, 14, 8, '#4a4a52');
+        _r(c, catX + 1, catY + 1, 12, 6, '#5a5a64');
+        // Head
+        _r(c, catX + 10, catY, 8, 7, '#5a5a64');
+        // Ears
+        _r(c, catX + 11, catY - 2, 3, 3, '#5a5a64');
+        _r(c, catX + 15, catY - 2, 3, 3, '#5a5a64');
+        _r(c, catX + 12, catY - 1, 1, 1, '#e8a0b0');
+        _r(c, catX + 16, catY - 1, 1, 1, '#e8a0b0');
+        // Closed eyes (sleeping)
+        _r(c, catX + 12, catY + 2, 2, 1, '#2a2a32');
+        _r(c, catX + 16, catY + 2, 2, 1, '#2a2a32');
+        // Tail - twitches every few frames
+        const tailWag = (f % 12 < 3) ? 1 : (f % 12 < 6) ? -1 : 0;
+        _r(c, catX - 2, catY + 6 + tailWag, 4, 3, '#4a4a52');
+        _r(c, catX - 5, catY + 5 + tailWag, 4, 2, '#5a5a64');
+        // Nose
+        _r(c, catX + 14, catY + 4, 2, 1, '#e8a0b0');
+    }
+
+    // ── Cactus/plant ──
+    _r(c, 250, 236, 6, 10, '#3a7a3a');
+    _r(c, 248, 240, 4, 4, '#2a6a2a');
+    _r(c, 254, 238, 4, 6, '#4a8a4a');
+    _r(c, 249, 246, 8, 4, '#6a4a2a');
 
     // ── Character (Coder — viewed from behind) ──
     {
-        const cx = 80;
-        const breathe = st === 'idle' ? Math.round(Math.sin(f * 0.08) * 0.6) : 0;
-        const by = 98 + breathe;
+        const cx = 160;
+        const breathe = st === 'idle' ? Math.round(Math.sin(f * 0.08) * 1) : 0;
+        const by = 198 + breathe;
 
-        // ── Hair (back of head) ──
-        _r(c, cx - 6, by, 12, 5, '#5c3a1e');
-        _r(c, cx - 7, by + 2, 14, 4, '#4a2e16');
+        // Hair (back of head)
+        _r(c, cx - 12, by, 24, 10, '#5c3a1e');
+        _r(c, cx - 14, by + 4, 28, 8, '#4a2e16');
         // Ears
-        _r(c, cx - 8, by + 3, 2, 3, '#c49460');
-        _r(c, cx + 6, by + 3, 2, 3, '#c49460');
+        _r(c, cx - 16, by + 6, 4, 6, '#c49460');
+        _r(c, cx + 12, by + 6, 4, 6, '#c49460');
         // Back of head / neck
-        _r(c, cx - 5, by + 6, 10, 3, '#c49460');
-        _r(c, cx - 3, by + 9, 6, 3, '#b08450');
+        _r(c, cx - 10, by + 12, 20, 6, '#c49460');
+        _r(c, cx - 6, by + 18, 12, 6, '#b08450');
 
-        // ── Shoulders ──
-        _r(c, cx - 18, by + 12, 36, 5, '#22222e');
-        _r(c, cx - 18, by + 12, 36, 1, '#2e2e3c');
+        // Headphones
+        _r(c, cx - 14, by - 2, 28, 4, '#2a2a34');
+        _r(c, cx - 18, by + 4, 6, 10, '#2a2a34');
+        _r(c, cx + 12, by + 4, 6, 10, '#2a2a34');
+        _r(c, cx - 17, by + 5, 4, 8, '#3a3a4a');
+        _r(c, cx + 13, by + 5, 4, 8, '#3a3a4a');
 
-        // ── Upper back (hoodie) ──
-        _r(c, cx - 16, by + 17, 32, 22, '#2a2a38');
+        // Shoulders
+        _r(c, cx - 36, by + 24, 72, 10, '#22222e');
+        _r(c, cx - 36, by + 24, 72, 2, '#2e2e3c');
+
+        // Upper back (hoodie)
+        _r(c, cx - 32, by + 34, 64, 44, '#2a2a38');
         // Shoulder shading
-        _r(c, cx - 16, by + 17, 4, 8, '#222230');
-        _r(c, cx + 12, by + 17, 4, 8, '#222230');
+        _r(c, cx - 32, by + 34, 8, 16, '#222230');
+        _r(c, cx + 24, by + 34, 8, 16, '#222230');
         // Center seam
-        _r(c, cx, by + 17, 1, 22, '#222230');
+        _r(c, cx - 1, by + 34, 2, 44, '#222230');
         // Logo on back
-        _r(c, cx - 6, by + 23, 12, 5, '#4a4a5c');
-        _r(c, cx - 5, by + 24, 10, 3, '#2a2a38');
+        _r(c, cx - 12, by + 46, 24, 10, '#4a4a5c');
+        _r(c, cx - 10, by + 48, 20, 6, '#2a2a38');
         // Hem
-        _r(c, cx - 16, by + 38, 32, 1, '#1e1e2a');
+        _r(c, cx - 32, by + 77, 64, 2, '#1e1e2a');
 
-        // ── Lower body ──
-        _r(c, cx - 13, by + 39, 26, 14, '#1e1e2a');
-        _r(c, cx - 11, by + 53, 22, 6, '#1a1a26');
+        // Lower body
+        _r(c, cx - 26, by + 79, 52, 28, '#1e1e2a');
+        _r(c, cx - 22, by + 107, 44, 12, '#1a1a26');
 
-        // ── Arms ──
+        // Arms
         const typing = st === 'typing';
         const thinking = st === 'thinking';
         const done = st === 'done';
-        const lWob = typing ? [0, -1, 0, 1][f % 4] : 0;
-        const rWob = typing ? [1, 0, -1, 0][f % 4] : 0;
+        const lWob = typing ? [0, -2, 0, 2][f % 4] : 0;
+        const rWob = typing ? [2, 0, -2, 0][f % 4] : 0;
 
         if (done) {
-            // Victory pose — arms up
-            _r(c, cx - 22, by + 6, 5, 12, '#22222e');
-            _r(c, cx - 23, by + 2, 4, 6, '#22222e');
-            _r(c, cx - 23, by, 3, 3, '#c49460');
-            _r(c, cx + 17, by + 6, 5, 12, '#22222e');
-            _r(c, cx + 18, by + 2, 4, 6, '#22222e');
-            _r(c, cx + 20, by, 3, 3, '#c49460');
+            // Victory pose — arms raised
+            _r(c, cx - 44, by + 12, 10, 24, '#22222e');
+            _r(c, cx - 46, by + 4, 8, 12, '#22222e');
+            _r(c, cx - 46, by, 6, 6, '#c49460');
+            _r(c, cx + 34, by + 12, 10, 24, '#22222e');
+            _r(c, cx + 36, by + 4, 8, 12, '#22222e');
+            _r(c, cx + 40, by, 6, 6, '#c49460');
         } else if (thinking) {
             // Left arm at desk
-            _r(c, cx - 19, by + 14, 4, 14, '#22222e');
-            _r(c, cx - 21, by + 12, 4, 4, '#2a2a38');
-            _r(c, cx - 22, by + 12, 3, 2, '#c49460');
+            _r(c, cx - 38, by + 28, 8, 28, '#22222e');
+            _r(c, cx - 42, by + 24, 8, 8, '#2a2a38');
+            _r(c, cx - 44, by + 24, 6, 4, '#c49460');
             // Right arm to head (thinking)
             const thinkF = [0, 1, 2, 1][f % 4];
-            _r(c, cx + 15, by + 14, 4, 8 - thinkF * 2, '#22222e');
-            _r(c, cx + 14, by + 6 + (2 - thinkF), 5, 6, '#2a2a38');
-            _r(c, cx + 13, by + 4 + (2 - thinkF), 3, 3, '#c49460');
+            _r(c, cx + 30, by + 28, 8, 16 - thinkF * 4, '#22222e');
+            _r(c, cx + 28, by + 12 + (4 - thinkF * 2), 10, 12, '#2a2a38');
+            _r(c, cx + 26, by + 8 + (4 - thinkF * 2), 6, 6, '#c49460');
         } else {
             // Normal arms reaching to desk/keyboard
-            // Left arm
-            _r(c, cx - 19, by + 14, 4, 12 + lWob, '#22222e');
-            _r(c, cx - 22, by + 13, 5, 3, '#2a2a38');
-            _r(c, cx - 24, by + 12 + lWob, 3, 2, '#c49460');
-            // Right arm
-            _r(c, cx + 15, by + 14, 4, 12 + rWob, '#22222e');
-            _r(c, cx + 17, by + 13, 5, 3, '#2a2a38');
-            _r(c, cx + 21, by + 12 + rWob, 3, 2, '#c49460');
+            _r(c, cx - 38, by + 28, 8, 24 + lWob, '#22222e');
+            _r(c, cx - 44, by + 26, 10, 6, '#2a2a38');
+            _r(c, cx - 48, by + 24 + lWob, 6, 4, '#c49460');
+            _r(c, cx + 30, by + 28, 8, 24 + rWob, '#22222e');
+            _r(c, cx + 34, by + 26, 10, 6, '#2a2a38');
+            _r(c, cx + 42, by + 24 + rWob, 6, 4, '#c49460');
         }
     }
 
     // ── Chair ──
-    _r(c, 56, 150, 4, 18, '#1e1e2a');
-    _r(c, 100, 150, 4, 18, '#1e1e2a');
-    _r(c, 56, 150, 4, 1, '#2e2e40');
-    _r(c, 100, 150, 4, 1, '#2e2e40');
-    _r(c, 58, 164, 44, 5, '#242434');
-    _r(c, 58, 164, 44, 1, '#2e2e40');
-    _r(c, 76, 169, 8, 10, '#1e1e2a');
-    _r(c, 76, 169, 8, 1, '#2e2e40');
-    // Wheel base (star shape)
-    _r(c, 64, 178, 32, 2, '#2a2c36');
-    _r(c, 78, 176, 4, 6, '#2a2c36');
+    _r(c, 112, 310, 8, 36, '#1e1e2a'); // left armrest
+    _r(c, 200, 310, 8, 36, '#1e1e2a'); // right armrest
+    _r(c, 112, 310, 8, 2, '#2e2e40');
+    _r(c, 200, 310, 8, 2, '#2e2e40');
+    // Chair seat
+    _r(c, 116, 340, 88, 10, '#242434');
+    _r(c, 116, 340, 88, 2, '#2e2e40');
+    // Chair stem
+    _r(c, 152, 350, 16, 20, '#1e1e2a');
+    _r(c, 152, 350, 16, 2, '#2e2e40');
+    // Star base
+    _r(c, 128, 368, 64, 4, '#2a2c36');
+    _r(c, 156, 364, 8, 12, '#2a2c36');
     // Wheels
-    _r(c, 64, 180, 4, 3, '#1a1c24');
-    _r(c, 92, 180, 4, 3, '#1a1c24');
-    _r(c, 78, 182, 4, 2, '#1a1c24');
-
-    // ── Coffee mug ──
-    _r(c, 20, 126, 5, 7, '#8b6e4e');
-    _r(c, 24, 128, 3, 3, '#8b6e4e');
-    _r(c, 25, 129, 2, 1, '#0c0e18');
-    _r(c, 20, 126, 5, 1, '#aaa');
-    _r(c, 21, 126, 3, 1, '#6b4422');
-    if (f % 20 < 14) {
-        c.globalAlpha = 0.3;
-        _r(c, 21 + (f % 3), 123 - (f % 4), 2, 2, '#fff');
-        _r(c, 23 - (f % 2), 121 - (f % 3), 1, 2, '#fff');
-        c.globalAlpha = 1;
-    }
+    _r(c, 128, 372, 8, 6, '#1a1c24');
+    _r(c, 184, 372, 8, 6, '#1a1c24');
+    _r(c, 156, 376, 8, 4, '#1a1c24');
 
     // ── Floor ──
-    _r(c, 0, 184, 160, 76, '#0a0c14');
-    for (let i = 0; i < 7; i++) _r(c, 0, 190 + i * 10, 160, 1, '#12141e');
+    {
+        const floorG = c.createLinearGradient(0, 400, 0, 520);
+        floorG.addColorStop(0, '#0e1018');
+        floorG.addColorStop(1, '#08090e');
+        c.fillStyle = floorG;
+        c.fillRect(0, 400, 320, 120);
+    }
+    for (let i = 0; i < 6; i++) _r(c, 0, 410 + i * 18, 320, 1, '#12141e');
 
     // ── Floor cables ──
-    _r(c, 22, 194, 36, 1, '#14141e');
-    _r(c, 58, 194, 1, 28, '#14141e');
-    _r(c, 58, 222, 28, 1, '#14141e');
-    _r(c, 100, 198, 36, 1, '#14141e');
-    _r(c, 100, 198, 1, 22, '#14141e');
-    _r(c, 32, 210, 1, 18, '#14141e');
-    _r(c, 32, 228, 18, 1, '#14141e');
-    _r(c, 112, 204, 28, 1, '#14141e');
-    _r(c, 118, 218, 1, 20, '#14141e');
-    _r(c, 44, 242, 56, 1, '#14141e');
+    _r(c, 40, 410, 60, 2, '#14141e');
+    _r(c, 100, 410, 2, 50, '#14141e');
+    _r(c, 100, 460, 60, 2, '#14141e');
+    _r(c, 200, 420, 60, 2, '#14141e');
+    _r(c, 200, 420, 2, 40, '#14141e');
+    _r(c, 60, 440, 2, 30, '#14141e');
+    _r(c, 60, 470, 40, 2, '#14141e');
+    _r(c, 220, 430, 60, 2, '#14141e');
+    _r(c, 240, 450, 2, 40, '#14141e');
+    _r(c, 80, 490, 120, 2, '#14141e');
+
+    // ── Pizza box on floor ──
+    _r(c, 220, 475, 40, 6, '#8a6a3a');
+    _r(c, 220, 475, 40, 2, '#a07a44');
+    _r(c, 222, 477, 36, 2, '#6a5028');
+    // Lid slightly open
+    _r(c, 220, 472, 40, 4, '#9a7a44');
+    _r(c, 222, 473, 36, 2, '#b08a50');
+    // Tiny pizza slice peeking out
+    _r(c, 258, 474, 4, 3, '#e0a040');
+    _r(c, 259, 475, 2, 1, '#d04030');
 
     // ── Title bar (drawn last, on top) ──
-    _r(c, 0, 0, 160, 12, '#0a0c14');
-    _r(c, 0, 11, 160, 1, '#1a1c2a');
-    c.font = 'bold 7px monospace';
+    _r(c, 0, 0, 320, 24, '#0a0c14');
+    _r(c, 0, 22, 320, 2, '#1a1c2a');
+    c.font = 'bold 11px monospace';
     c.fillStyle = '#8a8aaa';
-    c.fillText('CODER AGENT', 4, 8);
+    c.fillText('CODER AGENT', 8, 16);
     // Status dot
-    _r(c, 96, 3, 5, 5, sc);
-    if (act) { c.globalAlpha = 0.4; _r(c, 95, 2, 7, 7, sc); c.globalAlpha = 1; }
-    c.font = '6px monospace';
+    c.beginPath(); c.arc(196, 12, 5, 0, Math.PI * 2); c.fillStyle = sc; c.fill();
+    if (act) { c.globalAlpha = 0.4; c.beginPath(); c.arc(196, 12, 8, 0, Math.PI * 2); c.fillStyle = sc; c.fill(); c.globalAlpha = 1; }
+    c.font = '10px monospace';
     c.fillStyle = '#6a6a8a';
-    c.fillText('[' + _stLabel(st) + ']', 104, 8);
+    c.fillText('[' + _stLabel(st) + ']', 210, 16);
 
     // ── Ambient glow effects ──
     if (act) {
         c.globalAlpha = 0.05;
-        _r(c, 20, 132, 120, 8, sc);
+        _r(c, 36, 276, 248, 14, sc);
         c.globalAlpha = 0.025;
-        _r(c, 30, 186, 100, 16, sc);
+        _r(c, 60, 402, 200, 30, sc);
         c.globalAlpha = 1;
     }
     if (st === 'done') {
@@ -2805,13 +2928,13 @@ function _renderUserCanvas() {
 
     // ── Blit to display ──
     const dc = cv.getContext('2d');
-    dc.imageSmoothingEnabled = false;
+    dc.imageSmoothingEnabled = true;
     dc.clearRect(0, 0, cv.width, cv.height);
     dc.drawImage(_offUser, 0, 0, cv.width, cv.height);
 }
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   AI WORKSTATION — Procedural 16-bit pixel art scene
+   AI WORKSTATION — Procedural pixel art scene
    ══════════════════════════════════════════════════════════════════════════════ */
 
 function _renderAICanvas() {
@@ -2826,243 +2949,383 @@ function _renderAICanvas() {
     const sc = _stCol(st);
     c.clearRect(0, 0, _GW, _GH);
 
-    // ── Room background ──
-    _r(c, 0, 0, 160, 260, '#0a0c16');
-    _r(c, 0, 12, 160, 248, '#141828');
-    for (let i = 0; i < 12; i++) _r(c, 0, 18 + i * 10, 160, 1, '#1a1e32');
-    _r(c, 0, 12, 160, 1, '#1e2236');
+    // ── Room background gradient ──
+    {
+        const bg = c.createLinearGradient(0, 24, 0, 300);
+        bg.addColorStop(0, '#141830');
+        bg.addColorStop(1, '#0a0c16');
+        c.fillStyle = bg;
+        c.fillRect(0, 24, 320, 276);
+    }
+    _r(c, 0, 0, 320, 24, '#0a0c16');
+    // Subtle texture lines
+    for (let i = 0; i < 20; i++) _r(c, 0, 30 + i * 14, 320, 1, '#1a1e32');
+    _r(c, 0, 24, 320, 2, '#1e2236');
 
     // ── Lab equipment LEFT — tubes and pipes ──
-    _r(c, 4, 82, 2, 120, '#484858');
-    _r(c, 22, 82, 2, 120, '#484858');
-    _r(c, 4, 82, 20, 2, '#585868');
-    _r(c, 4, 200, 20, 2, '#585868');
-    _r(c, 4, 120, 20, 2, '#484858');
-    _r(c, 4, 160, 20, 2, '#484858');
-    _r(c, 12, 82, 2, 120, '#484858');
+    _r(c, 0, 70, 48, 370, '#1e2028');
+    _r(c, 0, 70, 2, 370, '#363a48');
+    _r(c, 46, 70, 2, 370, '#262a36');
+    // Metal frame
+    _r(c, 6, 80, 4, 240, '#484858');
+    _r(c, 38, 80, 4, 240, '#484858');
+    _r(c, 6, 80, 36, 4, '#585868');
+    _r(c, 6, 160, 36, 4, '#484858');
+    _r(c, 6, 240, 36, 4, '#484858');
+    _r(c, 22, 80, 4, 240, '#484858');
+
     // Tube 1
-    _r(c, 7, 86, 4, 30, '#1a3a4a');
-    { const lv = 18 + Math.round(Math.sin(f * 0.08) * 4);
-      _r(c, 7, 86 + (30 - lv), 4, lv, '#4fc3f7');
-      c.globalAlpha = 0.3; _r(c, 8, 86 + (30 - lv), 2, 3, '#9ae5ff'); c.globalAlpha = 1; }
+    _r(c, 10, 90, 8, 60, '#1a3a4a');
+    { const lv = 36 + Math.round(Math.sin(f * 0.08) * 8);
+      _r(c, 10, 90 + (60 - lv), 8, lv, '#4fc3f7');
+      c.globalAlpha = 0.3; _r(c, 12, 90 + (60 - lv), 4, 6, '#9ae5ff'); c.globalAlpha = 1; }
     // Tube 2
-    _r(c, 16, 86, 4, 30, '#1a3a4a');
-    { const lv = 22 + Math.round(Math.cos(f * 0.06) * 5);
-      _r(c, 16, 86 + (30 - lv), 4, lv, '#2a8aaa');
-      c.globalAlpha = 0.3; _r(c, 17, 86 + (30 - lv), 2, 3, '#6ac8e8'); c.globalAlpha = 1; }
+    _r(c, 28, 90, 8, 60, '#1a3a4a');
+    { const lv = 44 + Math.round(Math.cos(f * 0.06) * 10);
+      _r(c, 28, 90 + (60 - lv), 8, lv, '#2a8aaa');
+      c.globalAlpha = 0.3; _r(c, 30, 90 + (60 - lv), 4, 6, '#6ac8e8'); c.globalAlpha = 1; }
     // Tube 3
-    _r(c, 7, 124, 4, 32, '#1a3a4a');
-    { const lv = 20 + Math.round(Math.sin(f * 0.1 + 2) * 4);
-      _r(c, 7, 124 + (32 - lv), 4, lv, '#4fc3f7'); }
-    // Processing units
-    _r(c, 4, 164, 20, 34, '#1e2028');
-    _r(c, 4, 164, 20, 1, '#363a48');
-    _r(c, 6, 168, 16, 12, '#282c38');
-    _r(c, 6, 184, 16, 10, '#282c38');
-    if ((f + 2) % 10 < (isHot ? 8 : 4)) _r(c, 8, 170, 2, 2, '#4fc3f7');
-    if ((f + 5) % 12 < (isHot ? 9 : 3)) _r(c, 14, 170, 2, 2, act ? sc : '#4caf50');
-    if ((f + 1) % 8 < (isHot ? 6 : 2)) _r(c, 8, 186, 2, 2, '#4caf50');
-    // Bubbles
+    _r(c, 10, 170, 8, 64, '#1a3a4a');
+    { const lv = 40 + Math.round(Math.sin(f * 0.1 + 2) * 8);
+      _r(c, 10, 170 + (64 - lv), 8, lv, '#4fc3f7'); }
+
+    // Bubbles when active
     if (isHot) {
-        const bY = (f * 3) % 24;
+        const bY1 = (f * 3) % 50;
+        const bY2 = (f * 3 + 16) % 50;
+        const bY3 = (f * 3 + 33) % 50;
         c.globalAlpha = 0.6;
-        _r(c, 8, 116 - (bY % 24), 2, 2, '#9ae5ff');
-        _r(c, 17, 116 - ((bY + 8) % 24), 1, 1, '#9ae5ff');
+        c.beginPath(); c.arc(14, 148 - bY1, 2, 0, Math.PI * 2); c.fillStyle = '#9ae5ff'; c.fill();
+        c.beginPath(); c.arc(32, 148 - (bY2 % 50), 1.5, 0, Math.PI * 2); c.fill();
+        c.beginPath(); c.arc(16, 148 - (bY3 % 50), 1, 0, Math.PI * 2); c.fill();
         c.globalAlpha = 1;
     }
 
-    // ── Monitors ──
-    // Top-left 1
-    _r(c, 30, 20, 36, 28, '#16181e'); _r(c, 30, 20, 36, 1, '#2a2e38'); _r(c, 30, 20, 1, 28, '#2a2e38');
-    _r(c, 32, 22, 32, 24, '#060a14');
-    _r(c, 46, 48, 4, 4, '#2a2e38'); _r(c, 42, 52, 12, 2, '#363a48');
-    // Top-left 2
-    _r(c, 72, 20, 36, 28, '#16181e'); _r(c, 72, 20, 36, 1, '#2a2e38'); _r(c, 72, 20, 1, 28, '#2a2e38');
-    _r(c, 74, 22, 32, 24, '#060a14');
-    _r(c, 88, 48, 4, 4, '#2a2e38'); _r(c, 84, 52, 12, 2, '#363a48');
-    // Middle-left (wireframe)
-    _r(c, 30, 58, 36, 30, '#16181e'); _r(c, 30, 58, 36, 1, '#2a2e38'); _r(c, 30, 58, 1, 30, '#2a2e38');
-    _r(c, 32, 60, 32, 26, '#060a14');
-    // Middle-right (neural net)
-    _r(c, 72, 58, 46, 30, '#16181e'); _r(c, 72, 58, 46, 1, '#2a2e38'); _r(c, 72, 58, 1, 30, '#2a2e38');
-    _r(c, 74, 60, 42, 26, '#060a14');
-    // Main large
-    _r(c, 36, 100, 74, 42, '#16181e'); _r(c, 36, 100, 74, 1, '#2a2e38'); _r(c, 36, 100, 1, 42, '#2a2e38');
-    _r(c, 38, 102, 70, 38, '#060a14');
-    _r(c, 70, 142, 6, 5, '#2a2e38'); _r(c, 64, 147, 18, 2, '#363a48');
+    // Processing units below tubes
+    _r(c, 4, 250, 40, 60, '#1e2028');
+    _r(c, 4, 250, 40, 2, '#363a48');
+    _r(c, 8, 256, 32, 20, '#282c38');
+    _r(c, 8, 280, 32, 20, '#282c38');
+    // LEDs on processing units
+    if ((f + 2) % 10 < (isHot ? 8 : 4)) {
+        c.beginPath(); c.arc(16, 266, 3, 0, Math.PI * 2); c.fillStyle = '#4fc3f7'; c.fill();
+    }
+    if ((f + 5) % 12 < (isHot ? 9 : 3)) {
+        c.beginPath(); c.arc(28, 266, 3, 0, Math.PI * 2); c.fillStyle = act ? sc : '#4caf50'; c.fill();
+    }
+    if ((f + 1) % 8 < (isHot ? 6 : 2)) {
+        c.beginPath(); c.arc(16, 290, 3, 0, Math.PI * 2); c.fillStyle = '#4caf50'; c.fill();
+    }
+    if ((f + 3) % 9 < (isHot ? 7 : 2)) {
+        c.beginPath(); c.arc(28, 290, 3, 0, Math.PI * 2); c.fillStyle = '#ff9800'; c.fill();
+    }
 
-    // ── Screen: Top-left 1 — Heatmap ──
-    { c.save(); c.beginPath(); c.rect(32, 22, 32, 24); c.clip();
-      for (let hy = 0; hy < 6; hy++) for (let hx = 0; hx < 8; hx++) {
+    // ── RIGHT side — bulletin board, palette, equipment ──
+    // Bulletin board
+    _r(c, 240, 30, 76, 80, '#8a7350');
+    _r(c, 240, 30, 76, 2, '#9a8360');
+    _r(c, 240, 30, 2, 80, '#6a5838');
+    // Pinned notes
+    _r(c, 246, 36, 28, 18, '#e4dcc8');
+    _r(c, 248, 38, 24, 2, '#888'); _r(c, 248, 42, 20, 2, '#888'); _r(c, 248, 46, 16, 2, '#888');
+    _r(c, 280, 34, 28, 22, '#c8dcd0');
+    _r(c, 282, 36, 24, 2, '#666'); _r(c, 282, 40, 20, 2, '#666'); _r(c, 282, 44, 22, 2, '#666');
+    _r(c, 250, 60, 24, 24, '#ffdca0');
+    _r(c, 252, 62, 20, 2, '#886'); _r(c, 252, 66, 16, 2, '#886');
+    _r(c, 280, 62, 24, 18, '#d8c8e0');
+    _r(c, 282, 64, 20, 2, '#668'); _r(c, 282, 68, 16, 2, '#668');
+    // Pins (as colored dots)
+    c.beginPath(); c.arc(258, 35, 3, 0, Math.PI * 2); c.fillStyle = '#e05050'; c.fill();
+    c.beginPath(); c.arc(292, 33, 3, 0, Math.PI * 2); c.fillStyle = '#5050e0'; c.fill();
+    c.beginPath(); c.arc(260, 59, 3, 0, Math.PI * 2); c.fillStyle = '#50b050'; c.fill();
+    c.beginPath(); c.arc(290, 61, 3, 0, Math.PI * 2); c.fillStyle = '#e0e050'; c.fill();
+
+    // Color palette display
+    _r(c, 244, 118, 68, 32, '#1a1c24');
+    _r(c, 244, 118, 68, 2, '#2a2e38');
+    { const pc = ['#e05050','#e09050','#e0e050','#50e050','#50e0e0','#5050e0','#e050e0','#fff',
+                   '#802020','#804020','#808020','#208020','#208080','#202080','#802080','#888'];
+      for (let py = 0; py < 2; py++) for (let px = 0; px < 8; px++)
+          _r(c, 248 + px * 8, 122 + py * 12, 6, 10, pc[py * 8 + px]); }
+
+    // Equipment panel
+    _r(c, 244, 160, 68, 80, '#1e2028');
+    _r(c, 244, 160, 68, 2, '#363a48');
+    for (let i = 0; i < 4; i++) {
+        _r(c, 252 + i * 16, 168, 8, 8, '#282c38');
+        if ((f + i * 3) % 10 < (isHot ? 7 : 3)) {
+            c.beginPath(); c.arc(256 + i * 16, 172, 3, 0, Math.PI * 2); c.fillStyle = i % 2 === 0 ? sc : '#4caf50'; c.fill();
+        }
+    }
+    // Sliders
+    for (let i = 0; i < 3; i++) {
+        _r(c, 252, 186 + i * 16, 52, 4, '#282c38');
+        const sliderX = 252 + Math.round(20 + Math.sin(f * 0.05 + i) * 16);
+        _r(c, sliderX, 184 + i * 16, 8, 8, '#4a4e60');
+    }
+
+    // ── Monitors (5 in array) ──
+    // Top-left small — heatmap
+    _r(c, 60, 40, 68, 56, '#16181e'); _r(c, 60, 40, 68, 2, '#2a2e38'); _r(c, 60, 40, 2, 56, '#2a2e38');
+    _r(c, 62, 42, 64, 52, '#060a14');
+    _r(c, 90, 96, 8, 8, '#2a2e38'); _r(c, 82, 104, 24, 4, '#363a48');
+
+    // Top-right small — token stream
+    _r(c, 144, 40, 68, 56, '#16181e'); _r(c, 144, 40, 68, 2, '#2a2e38'); _r(c, 144, 40, 2, 56, '#2a2e38');
+    _r(c, 146, 42, 64, 52, '#060a14');
+    _r(c, 174, 96, 8, 8, '#2a2e38'); _r(c, 166, 104, 24, 4, '#363a48');
+
+    // Middle-left — wireframe
+    _r(c, 60, 116, 68, 60, '#16181e'); _r(c, 60, 116, 68, 2, '#2a2e38'); _r(c, 60, 116, 2, 60, '#2a2e38');
+    _r(c, 62, 118, 64, 56, '#060a14');
+
+    // Middle-right — neural net
+    _r(c, 144, 116, 90, 60, '#16181e'); _r(c, 144, 116, 90, 2, '#2a2e38'); _r(c, 144, 116, 2, 60, '#2a2e38');
+    _r(c, 146, 118, 86, 56, '#060a14');
+
+    // Main large — code/data
+    _r(c, 72, 200, 160, 84, '#16181e'); _r(c, 72, 200, 160, 2, '#2a2e38'); _r(c, 72, 200, 2, 84, '#2a2e38');
+    _r(c, 74, 202, 156, 80, '#060a14');
+    _r(c, 144, 284, 12, 10, '#2a2e38'); _r(c, 132, 294, 36, 4, '#363a48');
+
+    // ── Screen: Heatmap (top-left) ──
+    { c.save(); c.beginPath(); c.rect(62, 42, 64, 52); c.clip();
+      for (let hy = 0; hy < 7; hy++) for (let hx = 0; hx < 8; hx++) {
           const v = (Math.sin((hx + f * 0.15) * 0.7) * Math.cos((hy + f * 0.1) * 0.9) + 1) / 2;
           const r = Math.round(v * 200 + 30), g = Math.round((1 - v) * 100 + 30), b = Math.round((1 - v) * 180 + 40);
           c.globalAlpha = act ? 0.7 : 0.3;
-          _r(c, 32 + hx * 4, 22 + hy * 4, 4, 4, `rgb(${r},${g},${b})`);
+          _r(c, 62 + hx * 8, 42 + hy * 7, 8, 7, `rgb(${r},${g},${b})`);
       } c.globalAlpha = 1; c.restore(); }
 
-    // ── Screen: Top-left 2 — Token stream ──
-    { c.save(); c.beginPath(); c.rect(74, 22, 32, 24); c.clip();
+    // ── Screen: Token stream (top-right) ──
+    { c.save(); c.beginPath(); c.rect(146, 42, 64, 52); c.clip();
       const tc = ['#569cd6','#ce9178','#4ec9b0','#c586c0','#dcdcaa','#9cdcfe'];
       const sp = isHot ? 4 : 1;
-      for (let i = 0; i < 10; i++) {
-          const tx = 74 + ((i * 12 - f * sp) % 48 + 48) % 48 - 8;
+      for (let i = 0; i < 16; i++) {
+          const tx = 146 + ((i * 16 - f * sp) % 80 + 80) % 80 - 12;
           c.globalAlpha = act ? 0.7 : 0.25;
-          _r(c, tx, 24 + (i % 5) * 4, 3 + (i % 4), 3, tc[i % tc.length]);
+          _r(c, tx, 46 + (i % 6) * 8, 6 + (i % 5), 5, tc[i % tc.length]);
       } c.globalAlpha = 1; c.restore(); }
 
-    // ── Screen: Middle-left — Wireframe cube ──
-    { c.save(); c.beginPath(); c.rect(32, 60, 32, 26); c.clip();
-      const cx = 48, cy = 73, sz = 8, a = f * 0.08;
+    // ── Screen: Wireframe cube (middle-left) ──
+    { c.save(); c.beginPath(); c.rect(62, 118, 64, 56); c.clip();
+      const cx = 94, cy = 146, sz = 16, a = f * 0.08;
       const co = Math.cos(a), si = Math.sin(a);
       const vt = [[-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]];
       const pr = vt.map(v => { const rx = v[0]*co - v[2]*si; return [cx + Math.round(rx * sz), cy + Math.round((v[1]*0.8 - (v[0]*si + v[2]*co)*0.3) * sz)]; });
       const ed = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
-      c.globalAlpha = act ? 0.7 : 0.3; c.strokeStyle = isHot ? sc : '#4ec9b0'; c.lineWidth = 1;
+      c.globalAlpha = act ? 0.7 : 0.3; c.strokeStyle = isHot ? sc : '#4ec9b0'; c.lineWidth = 1.5;
       ed.forEach(e => { c.beginPath(); c.moveTo(pr[e[0]][0], pr[e[0]][1]); c.lineTo(pr[e[1]][0], pr[e[1]][1]); c.stroke(); });
-      pr.forEach(p => _r(c, p[0], p[1], 2, 2, isHot ? '#fff' : '#4ec9b0'));
+      pr.forEach(p => { c.beginPath(); c.arc(p[0], p[1], 2.5, 0, Math.PI * 2); c.fillStyle = isHot ? '#fff' : '#4ec9b0'; c.fill(); });
       c.globalAlpha = 1; c.restore(); }
 
-    // ── Screen: Middle-right — Neural network ──
-    { c.save(); c.beginPath(); c.rect(74, 60, 42, 26); c.clip();
-      const ly = [3, 5, 4, 2], lx = [80, 90, 100, 110], nd = [];
-      ly.forEach((cnt, li) => { for (let ni = 0; ni < cnt; ni++) nd.push({ x: lx[li], y: 64 + (26 - cnt * 5) / 2 + ni * 5, l: li }); });
+    // ── Screen: Neural network (middle-right) ──
+    { c.save(); c.beginPath(); c.rect(146, 118, 86, 56); c.clip();
+      const layers = [3, 5, 4, 2], lx = [160, 180, 200, 220], nd = [];
+      layers.forEach((cnt, li) => { for (let ni = 0; ni < cnt; ni++) nd.push({ x: lx[li], y: 126 + (56 - cnt * 10) / 2 + ni * 10, l: li }); });
+      // Connections
       c.globalAlpha = act ? 0.2 : 0.08; c.strokeStyle = '#4a6080'; c.lineWidth = 1;
       for (let i = 0; i < nd.length; i++) for (let j = i + 1; j < nd.length; j++)
           if (nd[j].l === nd[i].l + 1) { c.beginPath(); c.moveTo(nd[i].x, nd[i].y); c.lineTo(nd[j].x, nd[j].y); c.stroke(); }
-      nd.forEach((n, i) => { c.globalAlpha = act ? 0.5 + Math.sin(f * 0.15 + i * 0.7) * 0.3 : 0.3; _r(c, n.x - 1, n.y - 1, 3, 3, isHot ? sc : '#4ec9b0'); });
-      if (act) { c.globalAlpha = 0.8; const pp = (f * 3) % 30; _r(c, 80 + pp, 70 + Math.sin(pp * 0.3) * 4, 2, 2, '#fff'); }
+      // Nodes
+      nd.forEach((n, i) => {
+          c.globalAlpha = act ? 0.5 + Math.sin(f * 0.15 + i * 0.7) * 0.3 : 0.3;
+          c.beginPath(); c.arc(n.x, n.y, 4, 0, Math.PI * 2); c.fillStyle = isHot ? sc : '#4ec9b0'; c.fill();
+      });
+      // Data pulse traveling along connections when active
+      if (act) {
+          c.globalAlpha = 0.8;
+          const pp = (f * 3) % 60;
+          c.beginPath(); c.arc(160 + pp, 140 + Math.sin(pp * 0.2) * 8, 3, 0, Math.PI * 2); c.fillStyle = '#fff'; c.fill();
+      }
       c.globalAlpha = 1; c.restore(); }
 
-    // ── Screen: Main — Code processing ──
-    { c.save(); c.beginPath(); c.rect(38, 102, 70, 38); c.clip();
-      const sp = isHot ? 3 : 1, lH = 3, scr = (f * sp) % lH;
+    // ── Screen: Main — Data processing ──
+    { c.save(); c.beginPath(); c.rect(74, 202, 156, 80); c.clip();
+      _r(c, 74, 202, 156, 80, '#0c1018');
+      const sp = isHot ? 3 : 1, lH = 6, scr = (f * sp) % lH;
       const sn = ['#569cd6','#ce9178','#dcdcaa','#c586c0','#9cdcfe','#4ec9b0','#d4d4d4'];
       for (let i = 0; i < 16; i++) {
-          const ly = 102 + i * lH - scr; if (ly < 100 || ly > 140) continue;
+          const ly = 202 + i * lH - scr; if (ly < 198 || ly > 282) continue;
           const s = i * 37 + 13;
-          c.globalAlpha = isHot ? 0.3 : 0.15; _r(c, 39, ly, 3, 2, '#636369');
-          c.globalAlpha = isHot ? 0.75 : 0.35;
-          let xp = 43 + (s % 3) * 3;
-          for (let t = 0; t < 3 + (s % 2); t++) { const tw = 3 + ((s + t * 11) % 14); _r(c, xp, ly, tw, 2, sn[(s + t) % sn.length]); xp += tw + 2; if (xp > 104) break; }
+          // Line numbers
+          c.globalAlpha = isHot ? 0.35 : 0.18;
+          _r(c, 76, ly + 1, 8, 4, '#636369');
+          // Code tokens
+          c.globalAlpha = isHot ? 0.8 : 0.4;
+          let xp = 88 + (s % 3) * 4;
+          for (let t = 0; t < 3 + (s % 2); t++) {
+              const tw = 6 + ((s + t * 11) % 20);
+              _r(c, xp, ly + 1, tw, 4, sn[(s + t) % sn.length]);
+              xp += tw + 3;
+              if (xp > 226) break;
+          }
       }
-      if (st === 'tool') { const pg = ((f * 4) % 60) / 60; _r(c, 40, 134, 64, 3, '#1a1c2a'); _r(c, 40, 134, Math.round(64 * pg), 3, sc); _r(c, 40, 134, Math.round(64 * pg), 1, '#fff'); }
-      if (isHot && f % 6 < 4) { c.globalAlpha = 0.9; _r(c, 50, 118, 1, 3, '#aeafad'); }
+      // Tool progress bar
+      if (st === 'tool') {
+          const pg = ((f * 4) % 80) / 80;
+          _r(c, 78, 272, 148, 6, '#1a1c2a');
+          _r(c, 78, 272, Math.round(148 * pg), 6, sc);
+          _r(c, 78, 272, Math.round(148 * pg), 2, '#fff');
+      }
+      // Blinking cursor
+      if (isHot && f % 6 < 4) { c.globalAlpha = 0.9; _r(c, 100, 238, 2, 5, '#aeafad'); }
       c.globalAlpha = 1; c.restore(); }
 
     // ── CRT scan lines ──
-    { const sf = (f * 3) % 40; c.globalAlpha = 0.06;
-      _r(c, 32, 22 + (sf % 24), 32, 1, '#fff'); _r(c, 74, 22 + (sf % 24), 32, 1, '#fff');
-      _r(c, 32, 60 + (sf % 26), 32, 1, '#fff'); _r(c, 74, 60 + (sf % 26), 42, 1, '#fff');
-      _r(c, 38, 102 + (sf % 38), 70, 1, '#fff'); c.globalAlpha = 1; }
+    { const sf = (f * 3) % 80; c.globalAlpha = 0.06;
+      _r(c, 62, 42 + (sf % 52), 64, 1, '#fff');
+      _r(c, 146, 42 + (sf % 52), 64, 1, '#fff');
+      _r(c, 62, 118 + (sf % 56), 64, 1, '#fff');
+      _r(c, 146, 118 + (sf % 56), 86, 1, '#fff');
+      _r(c, 74, 202 + (sf % 80), 156, 1, '#fff');
+      c.globalAlpha = 1; }
 
-    // ── Bulletin board ──
-    _r(c, 118, 22, 38, 48, '#8a7350'); _r(c, 118, 22, 38, 1, '#9a8360'); _r(c, 118, 22, 1, 48, '#6a5838');
-    _r(c, 121, 26, 14, 10, '#e4dcc8'); _r(c, 122, 27, 12, 1, '#888'); _r(c, 122, 29, 10, 1, '#888'); _r(c, 122, 31, 8, 1, '#888');
-    _r(c, 138, 25, 14, 12, '#c8dcd0'); _r(c, 139, 26, 12, 1, '#666'); _r(c, 139, 28, 10, 1, '#666'); _r(c, 139, 30, 11, 1, '#666');
-    _r(c, 124, 40, 12, 14, '#ffdca0'); _r(c, 125, 41, 10, 1, '#886'); _r(c, 125, 43, 8, 1, '#886');
-    _r(c, 140, 42, 12, 10, '#d8c8e0'); _r(c, 141, 43, 10, 1, '#668'); _r(c, 141, 45, 8, 1, '#668');
-    _r(c, 126, 25, 3, 3, '#e05050'); _r(c, 143, 24, 3, 3, '#5050e0'); _r(c, 128, 39, 3, 3, '#50b050'); _r(c, 144, 41, 3, 3, '#e0e050');
-
-    // ── Color palette ──
-    _r(c, 120, 76, 34, 18, '#1a1c24'); _r(c, 120, 76, 34, 1, '#2a2e38');
-    { const pc = ['#e05050','#e09050','#e0e050','#50e050','#50e0e0','#5050e0','#e050e0','#fff','#802020','#804020','#808020','#208020','#208080','#202080','#802080','#888'];
-      for (let py = 0; py < 2; py++) for (let px = 0; px < 8; px++) _r(c, 122 + px * 4, 78 + py * 7, 3, 5, pc[py * 8 + px]); }
-
-    // ── Equipment panel (right) ──
-    _r(c, 120, 98, 34, 44, '#1e2028'); _r(c, 120, 98, 34, 1, '#363a48');
-    for (let i = 0; i < 4; i++) { _r(c, 124 + i * 8, 104, 4, 4, '#282c38');
-        if ((f + i * 3) % 10 < (isHot ? 7 : 3)) _r(c, 125 + i * 8, 105, 2, 2, i % 2 === 0 ? sc : '#4caf50'); }
-    for (let i = 0; i < 3; i++) { _r(c, 124, 114 + i * 8, 26, 2, '#282c38');
-        _r(c, 124 + Math.round(10 + Math.sin(f * 0.05 + i) * 8), 113 + i * 8, 4, 4, '#4a4e60'); }
+    // ── Monitor glow on wall ──
+    if (act) {
+        c.globalAlpha = 0.04;
+        _r(c, 56, 28, 76, 10, sc);
+        _r(c, 140, 28, 76, 10, sc);
+        c.globalAlpha = 1;
+    }
 
     // ── Desk ──
-    _r(c, 28, 150, 108, 3, '#6a5a3e'); _r(c, 28, 150, 108, 1, '#7a6a4e');
-    _r(c, 28, 153, 108, 14, '#4a3c2a'); _r(c, 28, 166, 108, 1, '#3a2e1e');
-    _r(c, 32, 167, 3, 28, '#4a3c2a'); _r(c, 131, 167, 3, 28, '#4a3c2a');
-    // Keyboard
-    _r(c, 52, 151, 26, 5, '#26262e'); _r(c, 52, 151, 26, 1, '#3a3a44');
-    for (let kx = 0; kx < 5; kx++) for (let ky = 0; ky < 2; ky++) _r(c, 54 + kx * 4, 152 + ky * 2, 3, 1, '#404050');
-    // Mouse
-    _r(c, 82, 152, 4, 4, '#2a2a34'); _r(c, 83, 152, 2, 2, '#3a3a44');
+    _r(c, 52, 300, 216, 6, '#6a5a3e');
+    _r(c, 52, 300, 216, 2, '#7a6a4e');
+    _r(c, 52, 306, 216, 28, '#4a3c2a');
+    _r(c, 52, 333, 216, 2, '#3a2e1e');
+    // Desk legs
+    _r(c, 58, 336, 6, 54, '#4a3c2a');
+    _r(c, 256, 336, 6, 54, '#4a3c2a');
 
-    // ── Character (AI researcher — behind-right view) ──
-    { const cx = 94, by = 130, br = st === 'idle' ? Math.round(Math.sin(f * 0.07) * 0.6) : 0;
+    // Keyboard
+    _r(c, 108, 301, 52, 10, '#26262e');
+    _r(c, 108, 301, 52, 2, '#3a3a44');
+    for (let kx = 0; kx < 9; kx++) for (let ky = 0; ky < 3; ky++)
+        _r(c, 111 + kx * 5, 303 + ky * 3, 4, 2, '#404050');
+    // Mouse
+    _r(c, 170, 303, 8, 8, '#2a2a34');
+    _r(c, 172, 303, 4, 4, '#3a3a44');
+
+    // ── Coffee mug ──
+    _r(c, 68, 290, 10, 12, '#8b6e4e');
+    _r(c, 77, 294, 5, 6, '#8b6e4e');
+    _r(c, 79, 295, 3, 2, '#0a0c16');
+    _r(c, 68, 290, 10, 2, '#aaa');
+    // Steam
+    if (f % 20 < 14) {
+        c.globalAlpha = 0.3;
+        _r(c, 71 + (f % 3), 284 - (f % 6), 3, 3, '#fff');
+        _r(c, 74 - (f % 2), 280 - (f % 5), 2, 3, '#fff');
+        c.globalAlpha = 1;
+    }
+
+    // ── Character (AI researcher — behind view) ──
+    { const cx = 188, by = 264, br = st === 'idle' ? Math.round(Math.sin(f * 0.07) * 1) : 0;
       // Hair
-      _r(c, cx - 5, by + br, 10, 5, '#2a1a0e'); _r(c, cx - 6, by + 2 + br, 12, 4, '#1e140a');
+      _r(c, cx - 10, by + br, 20, 10, '#2a1a0e');
+      _r(c, cx - 12, by + 4 + br, 24, 8, '#1e140a');
       // Ponytail
-      _r(c, cx + 5, by + 4 + br, 3, 8, '#2a1a0e'); _r(c, cx + 6, by + 8 + br, 2, 6, '#1e140a');
+      _r(c, cx + 10, by + 8 + br, 6, 16, '#2a1a0e');
+      _r(c, cx + 12, by + 16 + br, 4, 12, '#1e140a');
       // Ears + neck
-      _r(c, cx - 7, by + 3 + br, 2, 3, '#c49460'); _r(c, cx + 5, by + 3 + br, 2, 3, '#c49460');
-      _r(c, cx - 4, by + 6 + br, 8, 3, '#c49460'); _r(c, cx - 3, by + 9 + br, 6, 3, '#b08450');
+      _r(c, cx - 14, by + 6 + br, 4, 6, '#c49460');
+      _r(c, cx + 10, by + 6 + br, 4, 6, '#c49460');
+      _r(c, cx - 8, by + 12 + br, 16, 6, '#c49460');
+      _r(c, cx - 6, by + 18 + br, 12, 6, '#b08450');
+
+      // Headphones
+      _r(c, cx - 12, by - 2 + br, 24, 4, '#2a2a34');
+      _r(c, cx - 16, by + 4 + br, 6, 10, '#2a2a34');
+      _r(c, cx + 10, by + 4 + br, 6, 10, '#2a2a34');
+
       // Shoulders
-      _r(c, cx - 16, by + 12 + br, 34, 5, '#444e36'); _r(c, cx - 16, by + 12 + br, 34, 1, '#5a6848');
-      // Torso
-      _r(c, cx - 14, by + 17 + br, 30, 22, '#5a6848');
-      _r(c, cx - 14, by + 17 + br, 4, 10, '#4a5838'); _r(c, cx + 10, by + 17 + br, 4, 10, '#4a5838');
-      _r(c, cx, by + 17 + br, 1, 22, '#444e36');
-      _r(c, cx - 5, by + 12 + br, 10, 3, '#6a785a');
-      _r(c, cx - 14, by + 38 + br, 30, 1, '#3e4a32');
+      _r(c, cx - 32, by + 24 + br, 68, 10, '#444e36');
+      _r(c, cx - 32, by + 24 + br, 68, 2, '#5a6848');
+      // Collar detail
+      _r(c, cx - 10, by + 24 + br, 20, 6, '#6a785a');
+
+      // Torso (lab/green jacket)
+      _r(c, cx - 28, by + 34 + br, 60, 44, '#5a6848');
+      _r(c, cx - 28, by + 34 + br, 8, 20, '#4a5838'); // left shading
+      _r(c, cx + 20, by + 34 + br, 8, 20, '#4a5838'); // right shading
+      _r(c, cx - 1, by + 34 + br, 2, 44, '#444e36'); // center seam
+      _r(c, cx - 28, by + 77 + br, 60, 2, '#3e4a32'); // hem
+
       // Lower body
-      _r(c, cx - 12, by + 39 + br, 26, 14, '#2a2a34'); _r(c, cx - 10, by + 53 + br, 22, 5, '#222230');
+      _r(c, cx - 24, by + 79 + br, 52, 28, '#2a2a34');
+      _r(c, cx - 20, by + 107 + br, 44, 10, '#222230');
+
       // Arms
       const tp = st === 'typing', th = st === 'thinking', dn = st === 'done';
-      const lw = tp ? [0,-1,0,1][f%4] : 0, rw = tp ? [1,0,-1,0][f%4] : 0;
+      const lw = tp ? [0,-2,0,2][f%4] : 0, rw = tp ? [2,0,-2,0][f%4] : 0;
       if (dn) {
-          _r(c, cx-20, by+6, 5, 12, '#444e36'); _r(c, cx-21, by+2, 4, 6, '#5a6848'); _r(c, cx-21, by, 3, 3, '#c49460');
-          _r(c, cx+15, by+6, 5, 12, '#444e36'); _r(c, cx+16, by+2, 4, 6, '#5a6848'); _r(c, cx+18, by, 3, 3, '#c49460');
+          _r(c, cx-40, by+12, 10, 24, '#444e36'); _r(c, cx-42, by+4, 8, 12, '#5a6848'); _r(c, cx-42, by, 6, 6, '#c49460');
+          _r(c, cx+30, by+12, 10, 24, '#444e36'); _r(c, cx+32, by+4, 8, 12, '#5a6848'); _r(c, cx+36, by, 6, 6, '#c49460');
       } else if (th) {
-          _r(c, cx-17, by+14, 4, 14, '#444e36'); _r(c, cx-19, by+12, 4, 4, '#5a6848'); _r(c, cx-20, by+12, 3, 2, '#c49460');
+          _r(c, cx-34, by+28, 8, 28, '#444e36'); _r(c, cx-38, by+24, 8, 8, '#5a6848'); _r(c, cx-40, by+24, 6, 4, '#c49460');
           const tf = [0,1,2,1][f%4];
-          _r(c, cx+13, by+14, 4, 8-tf*2, '#444e36'); _r(c, cx+12, by+6+(2-tf), 5, 6, '#5a6848'); _r(c, cx+11, by+4+(2-tf), 3, 3, '#c49460');
+          _r(c, cx+26, by+28, 8, 16-tf*4, '#444e36'); _r(c, cx+24, by+12+(4-tf*2), 10, 12, '#5a6848'); _r(c, cx+22, by+8+(4-tf*2), 6, 6, '#c49460');
       } else {
-          _r(c, cx-17, by+14, 4, 12+lw, '#444e36'); _r(c, cx-20, by+13, 5, 3, '#5a6848'); _r(c, cx-22, by+12+lw, 3, 2, '#c49460');
-          _r(c, cx+13, by+14, 4, 12+rw, '#444e36'); _r(c, cx+16, by+13, 5, 3, '#5a6848'); _r(c, cx+20, by+12+rw, 3, 2, '#c49460');
+          _r(c, cx-34, by+28, 8, 24+lw, '#444e36'); _r(c, cx-40, by+26, 10, 6, '#5a6848'); _r(c, cx-44, by+24+lw, 6, 4, '#c49460');
+          _r(c, cx+26, by+28, 8, 24+rw, '#444e36'); _r(c, cx+32, by+26, 10, 6, '#5a6848'); _r(c, cx+40, by+24+rw, 6, 4, '#c49460');
       }
     }
 
     // ── Chair ──
-    _r(c, 72, 184, 4, 16, '#1e1e2a'); _r(c, 112, 184, 4, 16, '#1e1e2a');
-    _r(c, 72, 184, 4, 1, '#2e2e40'); _r(c, 112, 184, 4, 1, '#2e2e40');
-    _r(c, 74, 196, 40, 5, '#242434'); _r(c, 74, 196, 40, 1, '#2e2e40');
-    _r(c, 90, 201, 8, 8, '#1e1e2a'); _r(c, 82, 208, 24, 2, '#2a2c36');
-    _r(c, 80, 210, 4, 3, '#1a1c24'); _r(c, 104, 210, 4, 3, '#1a1c24');
+    _r(c, 142, 370, 8, 36, '#1e1e2a'); _r(c, 230, 370, 8, 36, '#1e1e2a');
+    _r(c, 142, 370, 8, 2, '#2e2e40'); _r(c, 230, 370, 8, 2, '#2e2e40');
+    _r(c, 148, 400, 84, 10, '#242434'); _r(c, 148, 400, 84, 2, '#2e2e40');
+    _r(c, 182, 410, 16, 16, '#1e1e2a'); _r(c, 166, 424, 48, 4, '#2a2c36');
+    _r(c, 162, 428, 8, 6, '#1a1c24'); _r(c, 210, 428, 8, 6, '#1a1c24');
 
-    // ── Coffee mug ──
-    _r(c, 118, 206, 5, 7, '#8b6e4e'); _r(c, 122, 208, 3, 3, '#8b6e4e');
-    _r(c, 123, 209, 2, 1, '#0a0c16'); _r(c, 118, 206, 5, 1, '#aaa');
-
-    // ── HYDRA server ──
-    _r(c, 6, 218, 48, 32, '#2a2c3a'); _r(c, 6, 218, 48, 1, '#3a3e4e'); _r(c, 6, 218, 1, 32, '#3a3e4e');
-    _r(c, 8, 222, 44, 8, '#222430'); _r(c, 8, 232, 44, 8, '#222430'); _r(c, 8, 242, 44, 6, '#222430');
-    c.font = '5px monospace'; c.fillStyle = '#4a6080'; c.fillText('HYDRA', 14, 228);
-    for (let i = 0; i < 6; i++) {
-        if ((f + i * 4) % 12 < (isHot ? 9 : 4)) _r(c, 10 + i * 7, 236, 2, 2, i % 2 === 0 ? sc : '#4caf50');
-        if ((f + i * 3 + 5) % 14 < (isHot ? 8 : 3)) _r(c, 10 + i * 7, 244, 2, 2, '#4caf50');
+    // ── HYDRA server (floor, left side) ──
+    _r(c, 10, 420, 80, 64, '#2a2c3a');
+    _r(c, 10, 420, 80, 2, '#3a3e4e');
+    _r(c, 10, 420, 2, 64, '#3a3e4e');
+    _r(c, 14, 426, 72, 16, '#222430');
+    _r(c, 14, 446, 72, 16, '#222430');
+    _r(c, 14, 466, 72, 12, '#222430');
+    c.font = 'bold 9px monospace'; c.fillStyle = '#4a6080'; c.fillText('HYDRA', 26, 438);
+    for (let i = 0; i < 8; i++) {
+        if ((f + i * 4) % 12 < (isHot ? 9 : 4)) {
+            c.beginPath(); c.arc(20 + i * 9, 454, 3, 0, Math.PI * 2); c.fillStyle = i % 2 === 0 ? sc : '#4caf50'; c.fill();
+        }
+        if ((f + i * 3 + 5) % 14 < (isHot ? 8 : 3)) {
+            c.beginPath(); c.arc(20 + i * 9, 472, 3, 0, Math.PI * 2); c.fillStyle = '#4caf50'; c.fill();
+        }
     }
 
     // ── Floor ──
-    _r(c, 0, 212, 160, 48, '#0a0c14');
-    for (let i = 0; i < 5; i++) _r(c, 0, 216 + i * 9, 160, 1, '#12141e');
+    {
+        const floorG = c.createLinearGradient(0, 400, 0, 520);
+        floorG.addColorStop(0, '#0e1018');
+        floorG.addColorStop(1, '#08090e');
+        c.fillStyle = floorG;
+        c.fillRect(0, 400, 320, 120);
+    }
+    for (let i = 0; i < 6; i++) _r(c, 0, 410 + i * 18, 320, 1, '#12141e');
     // Cables
-    _r(c, 60, 216, 40, 1, '#12121e'); _r(c, 60, 216, 1, 20, '#12121e');
-    _r(c, 100, 220, 1, 16, '#12121e'); _r(c, 80, 236, 30, 1, '#12121e');
-    _r(c, 110, 224, 30, 1, '#12121e'); _r(c, 140, 224, 1, 20, '#12121e');
-    _r(c, 60, 248, 80, 1, '#12121e'); _r(c, 40, 230, 1, 20, '#12121e');
+    _r(c, 120, 416, 80, 2, '#12121e'); _r(c, 120, 416, 2, 40, '#12121e');
+    _r(c, 200, 430, 2, 30, '#12121e'); _r(c, 160, 460, 60, 2, '#12121e');
+    _r(c, 220, 440, 60, 2, '#12121e'); _r(c, 280, 440, 2, 40, '#12121e');
+    _r(c, 120, 490, 160, 2, '#12121e'); _r(c, 80, 450, 2, 40, '#12121e');
 
     // ── Title bar ──
-    _r(c, 0, 0, 160, 12, '#0a0c14'); _r(c, 0, 11, 160, 1, '#1a1c2a');
-    c.font = 'bold 7px monospace'; c.fillStyle = '#8a8aaa'; c.fillText('AI WORKSTATION', 4, 8);
-    _r(c, 108, 3, 5, 5, sc);
-    if (act) { c.globalAlpha = 0.4; _r(c, 107, 2, 7, 7, sc); c.globalAlpha = 1; }
-    c.font = '6px monospace'; c.fillStyle = '#6a6a8a'; c.fillText('[' + _stLabel(st) + ']', 116, 8);
+    _r(c, 0, 0, 320, 24, '#0a0c14');
+    _r(c, 0, 22, 320, 2, '#1a1c2a');
+    c.font = 'bold 11px monospace'; c.fillStyle = '#8a8aaa'; c.fillText('AI WORKSTATION', 8, 16);
+    c.beginPath(); c.arc(216, 12, 5, 0, Math.PI * 2); c.fillStyle = sc; c.fill();
+    if (act) { c.globalAlpha = 0.4; c.beginPath(); c.arc(216, 12, 8, 0, Math.PI * 2); c.fillStyle = sc; c.fill(); c.globalAlpha = 1; }
+    c.font = '10px monospace'; c.fillStyle = '#6a6a8a'; c.fillText('[' + _stLabel(st) + ']', 230, 16);
 
     // ── Ambient effects ──
-    if (isHot) { c.globalAlpha = 0.04; _r(c, 30, 14, 80, 6, sc); c.globalAlpha = 0.03; _r(c, 40, 214, 80, 14, sc); c.globalAlpha = 1; }
+    if (isHot) { c.globalAlpha = 0.04; _r(c, 56, 28, 168, 12, sc); c.globalAlpha = 0.03; _r(c, 80, 404, 160, 28, sc); c.globalAlpha = 1; }
     if (st === 'done') { c.globalAlpha = 0.06 + Math.sin(f * 0.2) * 0.03; _r(c, 0, 0, _GW, _GH, '#4caf50'); c.globalAlpha = 1; }
 
     // ── Blit ──
     const dc = cv.getContext('2d');
-    dc.imageSmoothingEnabled = false;
+    dc.imageSmoothingEnabled = true;
     dc.clearRect(0, 0, cv.width, cv.height);
     dc.drawImage(_offAI, 0, 0, cv.width, cv.height);
 }
@@ -4809,7 +5072,7 @@ select.mc-input { cursor: pointer; }
 .mc-pixel-stage { display: flex; align-items: center; justify-content: center; gap: 0; position: relative; border-radius: 8px; border: 1px solid #1a1a24; overflow: hidden; background: #080810; }
 .mc-pixel-stage::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.06) 3px, rgba(0,0,0,0.06) 6px); z-index: 10; mix-blend-mode: multiply; border-radius: 8px; }
 .mc-pixel-desk { flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; z-index: 1; min-width: 0; overflow: hidden; }
-.mc-pixel-canvas { width: 100%; aspect-ratio: 629 / 1024; image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
+.mc-pixel-canvas { width: 100%; aspect-ratio: 320 / 520; display: block; }
 
 /* Hub / connection center */
 .mc-pixel-hub { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 80px; flex-shrink: 0; z-index: 5; position: relative; }
