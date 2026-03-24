@@ -2718,7 +2718,6 @@ function _renderUserCanvas() {
     // ══════════════════════════════════════════════════════════════════
     //  STEP 4: Non-screen overlays (LEDs, steam, etc.) drawn on top
     // ══════════════════════════════════════════════════════════════════
-    const sx = W / 629, sy = H / 1024;
 
     // Status LED
     if (f % 10 < 7) {
