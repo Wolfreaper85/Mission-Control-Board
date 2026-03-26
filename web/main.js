@@ -802,7 +802,7 @@ function _buildLayout() {
                         <div class="mc-column-cards" id="mc-col-active"></div>
                     </div>
                     <div class="mc-column" data-status="completed">
-                        <div class="mc-column-head"><span class="mc-col-dot" style="background:#4caf50"></span> Completed <span class="mc-col-count" id="mc-col-completed-count">0</span></div>
+                        <div class="mc-column-head"><span class="mc-col-dot" style="background:#4caf50"></span> Completed <button class="mc-clear-all-btn" id="mc-clear-completed" title="Delete all completed goals">🗑️ Clear</button><span class="mc-col-count" id="mc-col-completed-count">0</span></div>
                         <div class="mc-column-cards" id="mc-col-completed"></div>
                     </div>
                     <div class="mc-column" data-status="abandoned">
@@ -2361,6 +2361,26 @@ function _renderBoard(goals) {
             if (goalId && newStatus) _updateGoalStatus(goalId, newStatus);
         });
     });
+
+    // Clear All Completed button
+    const clearBtn = document.getElementById('mc-clear-completed');
+    if (clearBtn) {
+        clearBtn.onclick = async () => {
+            const completed = (_goalsCache || []).filter(g => g.status === 'completed');
+            if (completed.length === 0) return;
+            if (!confirm(`Delete all ${completed.length} completed goal(s)?`)) return;
+            try {
+                for (const g of completed) {
+                    await fetch('/api/plugin/mission-control/goals/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                        body: JSON.stringify({ goal_id: parseInt(g.id) })
+                    });
+                }
+                _loadGoals(); _loadStats();
+            } catch (e) { console.error('[MC] Clear completed failed:', e); }
+        };
+    }
 }
 
 // ─── Agents rendering ───────────────────────────────────────────────────────
@@ -2439,7 +2459,8 @@ function _stLabel(st) {
    Returns { mask, clean } canvases at native image resolution.
    ══════════════════════════════════════════════════════════════════════════════ */
 function _buildChromaMask(img) {
-    const w = img.width, h = img.height;
+    const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+    console.log('[MC] Building chroma mask:', w, 'x', h);
 
     // Draw source image to temp canvas to read pixels
     const tmp = document.createElement('canvas');
@@ -2463,10 +2484,18 @@ function _buildChromaMask(img) {
     const cleanImg = cc.createImageData(w, h);
     const cd = cleanImg.data;
 
+    let greenCount = 0;
+    // Sample first 20 green-ish pixels to log their actual values
+    let sampleLog = [];
     for (let i = 0; i < sd.length; i += 4) {
         const r = sd[i], g = sd[i + 1], b = sd[i + 2], a = sd[i + 3];
-        const isGreen = g > 160 && r < 120 && b < 120;
+        // Broadened detection: green channel dominant over red and blue
+        const isGreen = g > 100 && g > r * 1.2 && g > b * 1.2;
+        if (sampleLog.length < 20 && g > 80 && g > r && g > b) {
+            sampleLog.push(`rgb(${r},${g},${b}) @ px ${i/4} ${isGreen ? 'MATCH' : 'MISS'}`);
+        }
         if (isGreen) {
+            greenCount++;
             // Mask: opaque white
             md[i] = 255; md[i + 1] = 255; md[i + 2] = 255; md[i + 3] = 255;
             // Clean: dark fill
@@ -2478,6 +2507,8 @@ function _buildChromaMask(img) {
             cd[i] = r; cd[i + 1] = g; cd[i + 2] = b; cd[i + 3] = a;
         }
     }
+    console.log('[MC] Green pixels found:', greenCount, 'out of', w * h, '(' + Math.round(greenCount / (w * h) * 100) + '%)');
+    console.log('[MC] Sample green-ish pixels:', sampleLog);
     mc.putImageData(maskImg, 0, 0);
     cc.putImageData(cleanImg, 0, 0);
     return { mask: maskCv, clean: cleanCv };
@@ -4546,6 +4577,8 @@ function _injectStyles() {
 .mc-column-head { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 600; color: #aaa; padding: 8px 10px; background: #0a0a0f; border-radius: 8px 8px 0 0; border: 1px solid #1a1a24; border-bottom: none; }
 .mc-col-dot { width: 8px; height: 8px; border-radius: 50%; }
 .mc-col-count { margin-left: auto; font-size: 0.72rem; color: #666; background: #1a1a24; padding: 1px 8px; border-radius: 8px; }
+.mc-clear-all-btn { background: none; border: 1px solid #333; color: #888; font-size: 0.68rem; padding: 1px 6px; border-radius: 4px; cursor: pointer; transition: all 0.2s; }
+.mc-clear-all-btn:hover { background: #3a1515; border-color: #f44336; color: #f44336; }
 .mc-column-cards { background: #0a0a0f; border: 1px solid #1a1a24; border-radius: 0 0 8px 8px; padding: 8px; min-height: 80px; max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .mc-empty-col { color: #444; font-size: 0.78rem; text-align: center; padding: 20px; }
 
