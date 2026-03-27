@@ -102,6 +102,8 @@ let _pixelIdleTimer = null;
 let _pixelFrame = 0;
 let _pixelAnimTimer = null;
 let _offUser = null, _offAI = null; // offscreen canvases (629×1024, matching image)
+const _GW = 320, _GH = 520;        // game resolution for procedural mode
+let _pixelStyle = localStorage.getItem('mc-pixel-style') || 'chroma';
 
 // ─── Launcher init ───────────────────────────────────────────────────────────
 
@@ -841,6 +843,13 @@ function _buildLayout() {
 
             <!-- Pixel Art Workshop — 16-bit Canvas with image backgrounds -->
             <div class="mc-pixel-section" id="mc-pixel-section">
+                <div class="mc-pixel-header">
+                    <h2 class="mc-section-title">\u{1F3A8} Workshop</h2>
+                    <select class="mc-input mc-pixel-style-select" id="mc-pixel-style">
+                        <option value="chroma">Chroma Key (PNG Overlay)</option>
+                        <option value="procedural">Procedural Pixel Art</option>
+                    </select>
+                </div>
                 <div class="mc-pixel-stage">
                     <div class="mc-pixel-desk">
                         <canvas class="mc-pixel-canvas" id="mc-px-user-cv" width="320" height="520"></canvas>
@@ -2710,6 +2719,17 @@ function _initPixelArt() {
     };
     _pxImgAI.src = '/plugin-web/mission-control/AI-Workstation.png';
 
+    // Style selector binding
+    const styleSelect = document.getElementById('mc-pixel-style');
+    if (styleSelect) {
+        styleSelect.value = _pixelStyle;
+        styleSelect.addEventListener('change', () => {
+            _pixelStyle = styleSelect.value;
+            localStorage.setItem('mc-pixel-style', _pixelStyle);
+            _renderPixelScenes();
+        });
+    }
+
     // Start animation loop at 10fps
     if (_pixelAnimTimer) clearInterval(_pixelAnimTimer);
     _pixelAnimTimer = setInterval(function () { _pixelFrame++; _renderPixelScenes(); }, 100);
@@ -2726,7 +2746,15 @@ function _syncCanvasSize(cv) {
     if (cv.width !== dw || cv.height !== dh) { cv.width = dw; cv.height = dh; }
 }
 
-function _renderPixelScenes() { _renderUserCanvas(); _renderAICanvas(); }
+function _renderPixelScenes() {
+    if (_pixelStyle === 'procedural') {
+        _renderUserCanvas_proc();
+        _renderAICanvas_proc();
+    } else {
+        _renderUserCanvas();
+        _renderAICanvas();
+    }
+}
 
 /* ── State speed / opacity helpers ── */
 function _stSpeed(st) {
@@ -3117,6 +3145,798 @@ function _renderAICanvas() {
     dc.imageSmoothingEnabled = true;
     dc.clearRect(0, 0, cv.width, cv.height);
     dc.drawImage(_offAI, 0, 0, cv.width, cv.height);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   Procedural Pixel Art — copied from main branch, renamed with _proc suffix
+   ══════════════════════════════════════════════════════════════════════════════ */
+let _offUserProc = null, _offAIProc = null;
+
+function _renderUserCanvas_proc() {
+    const cv = document.getElementById('mc-px-user-cv');
+    if (!cv) return;
+    _syncCanvasSize(cv);
+    if (!_offUserProc) { _offUserProc = document.createElement('canvas'); _offUserProc.width = _GW; _offUserProc.height = _GH; }
+    const c = _offUserProc.getContext('2d');
+    const f = _pixelFrame, st = _pixelState;
+    const act = st === 'typing' || st === 'tool' || st === 'agent';
+    const sc = _stCol(st);
+    c.clearRect(0, 0, _GW, _GH);
+
+    // ── Room background gradient ──
+    {
+        const bg = c.createLinearGradient(0, 24, 0, 240);
+        bg.addColorStop(0, '#161830');
+        bg.addColorStop(1, '#0c0e18');
+        c.fillStyle = bg;
+        c.fillRect(0, 24, 320, 216);
+    }
+    _r(c, 0, 0, 320, 24, '#0c0e18');
+    for (let i = 0; i < 18; i++) _r(c, 30, 30 + i * 12, 260, 1, '#1c1e34');
+    _r(c, 28, 24, 2, 216, '#1e2038');
+    _r(c, 290, 24, 2, 216, '#1e2038');
+
+    // ── Server rack LEFT ──
+    _r(c, 0, 70, 28, 370, '#1a1c26');
+    _r(c, 0, 70, 2, 370, '#262a36');
+    _r(c, 26, 70, 2, 370, '#262a36');
+    _r(c, 0, 70, 28, 2, '#363a48');
+    for (let i = 0; i < 14; i++) {
+        const y = 78 + i * 25;
+        _r(c, 3, y, 22, 20, '#242630');
+        _r(c, 3, y, 22, 2, '#363a48');
+        _r(c, 5, y + 4, 18, 12, '#1a1c26');
+        if ((f + i * 3) % 14 < (act ? 9 : 3)) {
+            _r(c, 7, y + 7, 4, 4, act ? sc : '#4caf50');
+            c.globalAlpha = 0.3; _r(c, 6, y + 6, 6, 6, act ? sc : '#4caf50'); c.globalAlpha = 1;
+        }
+        if ((f + i * 5 + 7) % 16 < (act ? 8 : 2)) _r(c, 15, y + 7, 4, 4, '#4caf50');
+        if ((f + i * 7 + 3) % 18 < (act ? 10 : 2)) _r(c, 21, y + 7, 3, 3, '#ff9800');
+    }
+
+    // ── Server rack RIGHT ──
+    _r(c, 292, 70, 28, 370, '#1a1c26');
+    _r(c, 292, 70, 2, 370, '#262a36');
+    _r(c, 318, 70, 2, 370, '#262a36');
+    _r(c, 292, 70, 28, 2, '#363a48');
+    for (let i = 0; i < 14; i++) {
+        const y = 78 + i * 25;
+        _r(c, 295, y, 22, 20, '#242630');
+        _r(c, 295, y, 22, 2, '#363a48');
+        _r(c, 297, y + 4, 18, 12, '#1a1c26');
+        if ((f + i * 4 + 2) % 15 < (act ? 9 : 3)) {
+            _r(c, 299, y + 7, 4, 4, act ? sc : '#4caf50');
+            c.globalAlpha = 0.3; _r(c, 298, y + 6, 6, 6, act ? sc : '#4caf50'); c.globalAlpha = 1;
+        }
+        if ((f + i * 6 + 5) % 13 < (act ? 7 : 2)) _r(c, 307, y + 7, 4, 4, '#4caf50');
+        if ((f + i * 8 + 1) % 17 < (act ? 9 : 2)) _r(c, 313, y + 7, 3, 3, '#ff9800');
+    }
+
+    // ── Shelf on wall ──
+    _r(c, 32, 26, 90, 4, '#363a48');
+    _r(c, 32, 26, 90, 2, '#444860');
+    _r(c, 42, 16, 8, 10, '#3a7a3a');
+    _r(c, 40, 18, 4, 6, '#2a6a2a');
+    _r(c, 50, 20, 4, 4, '#4a8a4a');
+    _r(c, 44, 26, 8, 2, '#6a4a2a');
+    _r(c, 68, 18, 6, 8, '#c586c0');
+    _r(c, 66, 22, 10, 4, '#9a68a0');
+    _r(c, 84, 14, 12, 12, '#569cd6');
+    _r(c, 86, 15, 8, 10, '#3a6a9a');
+    _r(c, 84, 14, 2, 12, '#4a7abc');
+
+    // LED strip under shelf
+    {
+        const pulse = act ? 0.5 + Math.sin(f * 0.2) * 0.3 : 0.15;
+        c.globalAlpha = pulse;
+        _r(c, 34, 30, 86, 2, act ? sc : '#4a4a6a');
+        c.globalAlpha = pulse * 0.4;
+        _r(c, 34, 32, 86, 4, act ? sc : '#2a2a4a');
+        c.globalAlpha = 1;
+    }
+
+    // ── Picture frame on wall ──
+    _r(c, 200, 30, 44, 32, '#2a2e38');
+    _r(c, 202, 32, 40, 28, '#1a3a5a');
+    _r(c, 204, 34, 36, 24, '#0e2848');
+    _r(c, 210, 38, 12, 8, '#e040fb');
+    _r(c, 218, 42, 8, 12, '#4fc3f7');
+    _r(c, 226, 36, 10, 10, '#ffc107');
+
+    // ── Left monitor ──
+    _r(c, 44, 56, 48, 40, '#16181e');
+    _r(c, 44, 56, 48, 2, '#2a2e38');
+    _r(c, 44, 56, 2, 40, '#2a2e38');
+    _r(c, 46, 58, 44, 36, '#060a14');
+    _r(c, 64, 96, 8, 6, '#2a2e38');
+    _r(c, 58, 102, 20, 3, '#363a48');
+
+    // ── Center/main monitor ──
+    _r(c, 108, 46, 108, 60, '#16181e');
+    _r(c, 108, 46, 108, 2, '#2a2e38');
+    _r(c, 108, 46, 2, 60, '#2a2e38');
+    _r(c, 110, 48, 104, 56, '#060a14');
+    _r(c, 156, 106, 12, 8, '#2a2e38');
+    _r(c, 146, 114, 32, 3, '#363a48');
+
+    // ── Right monitor ──
+    _r(c, 232, 56, 48, 40, '#16181e');
+    _r(c, 232, 56, 48, 2, '#2a2e38');
+    _r(c, 232, 56, 2, 40, '#2a2e38');
+    _r(c, 234, 58, 44, 36, '#060a14');
+    _r(c, 252, 96, 8, 6, '#2a2e38');
+    _r(c, 246, 102, 20, 3, '#363a48');
+
+    // ── Screen content: Left monitor — File explorer ──
+    {
+        c.save(); c.beginPath(); c.rect(46, 58, 44, 36); c.clip();
+        _r(c, 46, 58, 44, 36, '#1e2028');
+        const spd = act ? 2 : 0.5;
+        const lH = 5, scroll = Math.floor(f * spd) % lH;
+        for (let i = 0; i < 10; i++) {
+            const ly = 58 + i * lH - scroll;
+            if (ly < 54 || ly > 94) continue;
+            const s = i * 23 + 5;
+            const indent = (s % 3) * 6;
+            const isSelected = act && (i === 3);
+            if (isSelected) { c.globalAlpha = 0.2; _r(c, 46, ly, 44, lH, '#569cd6'); }
+            c.globalAlpha = act ? 0.65 : 0.3;
+            _r(c, 48 + indent, ly + 1, 3, 3, (s % 4 === 0) ? '#dcdcaa' : '#569cd6');
+            _r(c, 53 + indent, ly + 1, 8 + (s % 12), 3, (s % 4 === 0) ? '#9a8a6a' : '#6a7a8a');
+        }
+        c.globalAlpha = 1; c.restore();
+    }
+
+    // ── Screen content: Center monitor — Code editor ──
+    {
+        c.save(); c.beginPath(); c.rect(110, 48, 104, 56); c.clip();
+        _r(c, 110, 48, 104, 56, '#1a1e28');
+        const spd = act ? 3 : 1;
+        const lH = 5, scroll = (f * spd) % lH;
+        const syn = ['#569cd6','#ce9178','#dcdcaa','#c586c0','#9cdcfe','#4ec9b0','#d4d4d4'];
+        for (let i = 0; i < 14; i++) {
+            const ly = 48 + i * lH - scroll;
+            if (ly < 44 || ly > 104) continue;
+            const s = i * 31 + 7;
+            if (act && i === 5) { c.globalAlpha = 0.08; _r(c, 110, ly, 104, lH, '#fff'); }
+            c.globalAlpha = act ? 0.35 : 0.18;
+            _r(c, 112, ly + 1, 6, 3, '#636369');
+            c.globalAlpha = act ? 0.8 : 0.4;
+            let xp = 122 + (s % 3) * 4;
+            for (let t = 0; t < 3 + (s % 3); t++) {
+                const tw = 6 + ((s + t * 13) % 18);
+                _r(c, xp, ly + 1, tw, 3, syn[(s + t) % syn.length]);
+                xp += tw + 3;
+                if (xp > 210) break;
+            }
+        }
+        if (act && f % 6 < 4) { c.globalAlpha = 0.9; _r(c, 140, 73, 2, 4, '#aeafad'); }
+        if (st === 'tool') {
+            const pg = ((f * 4) % 80) / 80;
+            _r(c, 112, 98, 100, 4, '#1a1c2a');
+            _r(c, 112, 98, Math.round(100 * pg), 4, sc);
+            _r(c, 112, 98, Math.round(100 * pg), 1, '#fff');
+        }
+        c.globalAlpha = 1; c.restore();
+    }
+
+    // ── Screen content: Right monitor — Terminal ──
+    {
+        c.save(); c.beginPath(); c.rect(234, 58, 44, 36); c.clip();
+        _r(c, 234, 58, 44, 36, '#080e08');
+        const spd = act ? 2 : 1, lH = 5, scroll = (f * spd) % lH;
+        for (let i = 0; i < 10; i++) {
+            const ly = 58 + i * lH - scroll;
+            if (ly < 54 || ly > 94) continue;
+            const s = i * 43 + 11;
+            c.globalAlpha = act ? 0.65 : 0.3;
+            _r(c, 236, ly + 1, 4, 3, '#4ec9b0');
+            const isErr = (s % 15) === 0;
+            const isWarn = (s % 11) === 0;
+            const col = isErr ? '#f44747' : isWarn ? '#cca700' : '#4af626';
+            _r(c, 242, ly + 1, 8 + (s % 28), 3, col);
+        }
+        if (act && f % 4 < 3) { c.globalAlpha = 0.8; _r(c, 236, 58 + 28, 6, 4, '#4af626'); }
+        c.globalAlpha = 1; c.restore();
+    }
+
+    // ── CRT scan lines on monitors ──
+    {
+        const scanF = (f * 3) % 60;
+        c.globalAlpha = 0.06;
+        _r(c, 46, 58 + (scanF % 36), 44, 1, '#fff');
+        _r(c, 110, 48 + (scanF % 56), 104, 1, '#fff');
+        _r(c, 234, 58 + (scanF % 36), 44, 1, '#fff');
+        c.globalAlpha = 1;
+    }
+
+    // ── Monitor glow on wall ──
+    if (act) {
+        c.globalAlpha = 0.04;
+        _r(c, 40, 30, 56, 20, sc);
+        _r(c, 104, 24, 116, 20, sc);
+        _r(c, 228, 30, 56, 20, sc);
+        c.globalAlpha = 1;
+    }
+
+    // ── Desk ──
+    _r(c, 30, 240, 260, 4, '#8a7650');
+    _r(c, 30, 240, 260, 2, '#9a8660');
+    _r(c, 30, 244, 260, 32, '#5a4830');
+    _r(c, 30, 275, 260, 2, '#4a3c26');
+    _r(c, 60, 256, 14, 3, '#363a48');
+    _r(c, 246, 256, 14, 3, '#363a48');
+    _r(c, 36, 277, 6, 60, '#4a3c26');
+    _r(c, 278, 277, 6, 60, '#4a3c26');
+
+    // ── Keyboard ──
+    _r(c, 100, 241, 56, 10, '#26262e');
+    _r(c, 100, 241, 56, 2, '#3a3a44');
+    for (let kx = 0; kx < 10; kx++) for (let ky = 0; ky < 3; ky++)
+        _r(c, 103 + kx * 5, 243 + ky * 3, 4, 2, '#404050');
+    if (act) {
+        const glowPulse = 0.15 + Math.sin(f * 0.15) * 0.1;
+        c.globalAlpha = glowPulse;
+        _r(c, 98, 251, 60, 3, sc);
+        c.globalAlpha = 1;
+    }
+
+    // ── Mouse on mousepad ──
+    _r(c, 168, 242, 20, 14, '#1a1a24');
+    _r(c, 174, 243, 8, 10, '#2a2a34');
+    _r(c, 176, 243, 4, 4, '#3a3a44');
+
+    // ── Coffee mug ──
+    _r(c, 42, 228, 10, 12, '#8b6e4e');
+    _r(c, 51, 232, 5, 6, '#8b6e4e');
+    _r(c, 53, 233, 3, 2, '#0c0e18');
+    _r(c, 42, 228, 10, 2, '#aaa');
+    _r(c, 44, 228, 6, 2, '#6b4422');
+    if (f % 20 < 14) {
+        c.globalAlpha = 0.3;
+        _r(c, 44 + (f % 3), 222 - (f % 6), 3, 3, '#fff');
+        _r(c, 48 - (f % 2), 218 - (f % 5), 2, 3, '#fff');
+        _r(c, 46 + ((f + 2) % 3), 214 - (f % 4), 2, 2, '#fff');
+        c.globalAlpha = 1;
+    }
+
+    // ── Phone/tablet ──
+    _r(c, 202, 241, 14, 8, '#1a1a24');
+    _r(c, 204, 242, 10, 6, '#2a3a50');
+    c.globalAlpha = 0.1; _r(c, 204, 242, 10, 6, '#4fc3f7'); c.globalAlpha = 1;
+
+    // ── Energy drink can ──
+    _r(c, 226, 232, 8, 14, '#1a4a1a');
+    _r(c, 226, 232, 8, 3, '#c0c0c0');
+    _r(c, 228, 236, 4, 6, '#4caf50');
+    _r(c, 227, 238, 6, 2, '#ffc107');
+
+    // ── Sleeping cat on desk ──
+    {
+        const catX = 62, catY = 231;
+        _r(c, catX, catY + 2, 14, 8, '#4a4a52');
+        _r(c, catX + 1, catY + 1, 12, 6, '#5a5a64');
+        _r(c, catX + 10, catY, 8, 7, '#5a5a64');
+        _r(c, catX + 11, catY - 2, 3, 3, '#5a5a64');
+        _r(c, catX + 15, catY - 2, 3, 3, '#5a5a64');
+        _r(c, catX + 12, catY - 1, 1, 1, '#e8a0b0');
+        _r(c, catX + 16, catY - 1, 1, 1, '#e8a0b0');
+        _r(c, catX + 12, catY + 2, 2, 1, '#2a2a32');
+        _r(c, catX + 16, catY + 2, 2, 1, '#2a2a32');
+        const tailWag = (f % 12 < 3) ? 1 : (f % 12 < 6) ? -1 : 0;
+        _r(c, catX - 2, catY + 6 + tailWag, 4, 3, '#4a4a52');
+        _r(c, catX - 5, catY + 5 + tailWag, 4, 2, '#5a5a64');
+        _r(c, catX + 14, catY + 4, 2, 1, '#e8a0b0');
+    }
+
+    // ── Cactus/plant ──
+    _r(c, 250, 236, 6, 10, '#3a7a3a');
+    _r(c, 248, 240, 4, 4, '#2a6a2a');
+    _r(c, 254, 238, 4, 6, '#4a8a4a');
+    _r(c, 249, 246, 8, 4, '#6a4a2a');
+
+    // ── Character (Coder — viewed from behind) ──
+    {
+        const cx = 160;
+        const breathe = st === 'idle' ? Math.round(Math.sin(f * 0.08) * 1) : 0;
+        const by = 198 + breathe;
+
+        _r(c, cx - 12, by, 24, 10, '#5c3a1e');
+        _r(c, cx - 14, by + 4, 28, 8, '#4a2e16');
+        _r(c, cx - 16, by + 6, 4, 6, '#c49460');
+        _r(c, cx + 12, by + 6, 4, 6, '#c49460');
+        _r(c, cx - 10, by + 12, 20, 6, '#c49460');
+        _r(c, cx - 6, by + 18, 12, 6, '#b08450');
+
+        _r(c, cx - 14, by - 2, 28, 4, '#2a2a34');
+        _r(c, cx - 18, by + 4, 6, 10, '#2a2a34');
+        _r(c, cx + 12, by + 4, 6, 10, '#2a2a34');
+        _r(c, cx - 17, by + 5, 4, 8, '#3a3a4a');
+        _r(c, cx + 13, by + 5, 4, 8, '#3a3a4a');
+
+        _r(c, cx - 36, by + 24, 72, 10, '#22222e');
+        _r(c, cx - 36, by + 24, 72, 2, '#2e2e3c');
+
+        _r(c, cx - 32, by + 34, 64, 44, '#2a2a38');
+        _r(c, cx - 32, by + 34, 8, 16, '#222230');
+        _r(c, cx + 24, by + 34, 8, 16, '#222230');
+        _r(c, cx - 1, by + 34, 2, 44, '#222230');
+        _r(c, cx - 12, by + 46, 24, 10, '#4a4a5c');
+        _r(c, cx - 10, by + 48, 20, 6, '#2a2a38');
+        _r(c, cx - 32, by + 77, 64, 2, '#1e1e2a');
+
+        _r(c, cx - 26, by + 79, 52, 28, '#1e1e2a');
+        _r(c, cx - 22, by + 107, 44, 12, '#1a1a26');
+
+        const typing = st === 'typing';
+        const thinking = st === 'thinking';
+        const done = st === 'done';
+        const lWob = typing ? [0, -2, 0, 2][f % 4] : 0;
+        const rWob = typing ? [2, 0, -2, 0][f % 4] : 0;
+
+        if (done) {
+            _r(c, cx - 44, by + 12, 10, 24, '#22222e');
+            _r(c, cx - 46, by + 4, 8, 12, '#22222e');
+            _r(c, cx - 46, by, 6, 6, '#c49460');
+            _r(c, cx + 34, by + 12, 10, 24, '#22222e');
+            _r(c, cx + 36, by + 4, 8, 12, '#22222e');
+            _r(c, cx + 40, by, 6, 6, '#c49460');
+        } else if (thinking) {
+            _r(c, cx - 38, by + 28, 8, 28, '#22222e');
+            _r(c, cx - 42, by + 24, 8, 8, '#2a2a38');
+            _r(c, cx - 44, by + 24, 6, 4, '#c49460');
+            const thinkF = [0, 1, 2, 1][f % 4];
+            _r(c, cx + 30, by + 28, 8, 16 - thinkF * 4, '#22222e');
+            _r(c, cx + 28, by + 12 + (4 - thinkF * 2), 10, 12, '#2a2a38');
+            _r(c, cx + 26, by + 8 + (4 - thinkF * 2), 6, 6, '#c49460');
+        } else {
+            _r(c, cx - 38, by + 28, 8, 24 + lWob, '#22222e');
+            _r(c, cx - 44, by + 26, 10, 6, '#2a2a38');
+            _r(c, cx - 48, by + 24 + lWob, 6, 4, '#c49460');
+            _r(c, cx + 30, by + 28, 8, 24 + rWob, '#22222e');
+            _r(c, cx + 34, by + 26, 10, 6, '#2a2a38');
+            _r(c, cx + 42, by + 24 + rWob, 6, 4, '#c49460');
+        }
+    }
+
+    // ── Chair ──
+    _r(c, 112, 310, 8, 36, '#1e1e2a');
+    _r(c, 200, 310, 8, 36, '#1e1e2a');
+    _r(c, 112, 310, 8, 2, '#2e2e40');
+    _r(c, 200, 310, 8, 2, '#2e2e40');
+    _r(c, 116, 340, 88, 10, '#242434');
+    _r(c, 116, 340, 88, 2, '#2e2e40');
+    _r(c, 152, 350, 16, 20, '#1e1e2a');
+    _r(c, 152, 350, 16, 2, '#2e2e40');
+    _r(c, 128, 368, 64, 4, '#2a2c36');
+    _r(c, 156, 364, 8, 12, '#2a2c36');
+    _r(c, 128, 372, 8, 6, '#1a1c24');
+    _r(c, 184, 372, 8, 6, '#1a1c24');
+    _r(c, 156, 376, 8, 4, '#1a1c24');
+
+    // ── Floor ──
+    {
+        const floorG = c.createLinearGradient(0, 400, 0, 520);
+        floorG.addColorStop(0, '#0e1018');
+        floorG.addColorStop(1, '#08090e');
+        c.fillStyle = floorG;
+        c.fillRect(0, 400, 320, 120);
+    }
+    for (let i = 0; i < 6; i++) _r(c, 0, 410 + i * 18, 320, 1, '#12141e');
+
+    // ── Floor cables ──
+    _r(c, 40, 410, 60, 2, '#14141e');
+    _r(c, 100, 410, 2, 50, '#14141e');
+    _r(c, 100, 460, 60, 2, '#14141e');
+    _r(c, 200, 420, 60, 2, '#14141e');
+    _r(c, 200, 420, 2, 40, '#14141e');
+    _r(c, 60, 440, 2, 30, '#14141e');
+    _r(c, 60, 470, 40, 2, '#14141e');
+    _r(c, 220, 430, 60, 2, '#14141e');
+    _r(c, 240, 450, 2, 40, '#14141e');
+    _r(c, 80, 490, 120, 2, '#14141e');
+
+    // ── Pizza box on floor ──
+    _r(c, 220, 475, 40, 6, '#8a6a3a');
+    _r(c, 220, 475, 40, 2, '#a07a44');
+    _r(c, 222, 477, 36, 2, '#6a5028');
+    _r(c, 220, 472, 40, 4, '#9a7a44');
+    _r(c, 222, 473, 36, 2, '#b08a50');
+    _r(c, 258, 474, 4, 3, '#e0a040');
+    _r(c, 259, 475, 2, 1, '#d04030');
+
+    // ── Title bar ──
+    _r(c, 0, 0, 320, 24, '#0a0c14');
+    _r(c, 0, 22, 320, 2, '#1a1c2a');
+    c.font = 'bold 11px monospace';
+    c.fillStyle = '#8a8aaa';
+    c.fillText('CODER AGENT', 8, 16);
+    c.beginPath(); c.arc(196, 12, 5, 0, Math.PI * 2); c.fillStyle = sc; c.fill();
+    if (act) { c.globalAlpha = 0.4; c.beginPath(); c.arc(196, 12, 8, 0, Math.PI * 2); c.fillStyle = sc; c.fill(); c.globalAlpha = 1; }
+    c.font = '10px monospace';
+    c.fillStyle = '#6a6a8a';
+    c.fillText('[' + _stLabel(st) + ']', 210, 16);
+
+    // ── Ambient glow effects ──
+    if (act) {
+        c.globalAlpha = 0.05;
+        _r(c, 36, 276, 248, 14, sc);
+        c.globalAlpha = 0.025;
+        _r(c, 60, 402, 200, 30, sc);
+        c.globalAlpha = 1;
+    }
+    if (st === 'done') {
+        c.globalAlpha = 0.06 + Math.sin(f * 0.2) * 0.03;
+        _r(c, 0, 0, _GW, _GH, '#4caf50');
+        c.globalAlpha = 1;
+    }
+
+    // ── Blit to display ──
+    const dc = cv.getContext('2d');
+    dc.imageSmoothingEnabled = true;
+    dc.clearRect(0, 0, cv.width, cv.height);
+    dc.drawImage(_offUserProc, 0, 0, cv.width, cv.height);
+}
+
+function _renderAICanvas_proc() {
+    const cv = document.getElementById('mc-px-ai-cv');
+    if (!cv) return;
+    _syncCanvasSize(cv);
+    if (!_offAIProc) { _offAIProc = document.createElement('canvas'); _offAIProc.width = _GW; _offAIProc.height = _GH; }
+    const c = _offAIProc.getContext('2d');
+    const f = _pixelFrame, st = _pixelState;
+    const act = st !== 'idle';
+    const isHot = st === 'typing' || st === 'tool' || st === 'agent';
+    const sc = _stCol(st);
+    c.clearRect(0, 0, _GW, _GH);
+
+    // ── Room background gradient ──
+    {
+        const bg = c.createLinearGradient(0, 24, 0, 300);
+        bg.addColorStop(0, '#141830');
+        bg.addColorStop(1, '#0a0c16');
+        c.fillStyle = bg;
+        c.fillRect(0, 24, 320, 276);
+    }
+    _r(c, 0, 0, 320, 24, '#0a0c16');
+    for (let i = 0; i < 20; i++) _r(c, 0, 30 + i * 14, 320, 1, '#1a1e32');
+    _r(c, 0, 24, 320, 2, '#1e2236');
+
+    // ── Lab equipment LEFT ──
+    _r(c, 0, 70, 48, 370, '#1e2028');
+    _r(c, 0, 70, 2, 370, '#363a48');
+    _r(c, 46, 70, 2, 370, '#262a36');
+    _r(c, 6, 80, 4, 240, '#484858');
+    _r(c, 38, 80, 4, 240, '#484858');
+    _r(c, 6, 80, 36, 4, '#585868');
+    _r(c, 6, 160, 36, 4, '#484858');
+    _r(c, 6, 240, 36, 4, '#484858');
+    _r(c, 22, 80, 4, 240, '#484858');
+
+    // Tube 1
+    _r(c, 10, 90, 8, 60, '#1a3a4a');
+    { const lv = 36 + Math.round(Math.sin(f * 0.08) * 8);
+      _r(c, 10, 90 + (60 - lv), 8, lv, '#4fc3f7');
+      c.globalAlpha = 0.3; _r(c, 12, 90 + (60 - lv), 4, 6, '#9ae5ff'); c.globalAlpha = 1; }
+    // Tube 2
+    _r(c, 28, 90, 8, 60, '#1a3a4a');
+    { const lv = 44 + Math.round(Math.cos(f * 0.06) * 10);
+      _r(c, 28, 90 + (60 - lv), 8, lv, '#2a8aaa');
+      c.globalAlpha = 0.3; _r(c, 30, 90 + (60 - lv), 4, 6, '#6ac8e8'); c.globalAlpha = 1; }
+    // Tube 3
+    _r(c, 10, 170, 8, 64, '#1a3a4a');
+    { const lv = 40 + Math.round(Math.sin(f * 0.1 + 2) * 8);
+      _r(c, 10, 170 + (64 - lv), 8, lv, '#4fc3f7'); }
+
+    // Bubbles when active
+    if (isHot) {
+        const bY1 = (f * 3) % 50;
+        const bY2 = (f * 3 + 16) % 50;
+        const bY3 = (f * 3 + 33) % 50;
+        c.globalAlpha = 0.6;
+        c.beginPath(); c.arc(14, 148 - bY1, 2, 0, Math.PI * 2); c.fillStyle = '#9ae5ff'; c.fill();
+        c.beginPath(); c.arc(32, 148 - (bY2 % 50), 1.5, 0, Math.PI * 2); c.fill();
+        c.beginPath(); c.arc(16, 148 - (bY3 % 50), 1, 0, Math.PI * 2); c.fill();
+        c.globalAlpha = 1;
+    }
+
+    // Processing units below tubes
+    _r(c, 4, 250, 40, 60, '#1e2028');
+    _r(c, 4, 250, 40, 2, '#363a48');
+    _r(c, 8, 256, 32, 20, '#282c38');
+    _r(c, 8, 280, 32, 20, '#282c38');
+    if ((f + 2) % 10 < (isHot ? 8 : 4)) {
+        c.beginPath(); c.arc(16, 266, 3, 0, Math.PI * 2); c.fillStyle = '#4fc3f7'; c.fill();
+    }
+    if ((f + 5) % 12 < (isHot ? 9 : 3)) {
+        c.beginPath(); c.arc(28, 266, 3, 0, Math.PI * 2); c.fillStyle = act ? sc : '#4caf50'; c.fill();
+    }
+    if ((f + 1) % 8 < (isHot ? 6 : 2)) {
+        c.beginPath(); c.arc(16, 290, 3, 0, Math.PI * 2); c.fillStyle = '#4caf50'; c.fill();
+    }
+    if ((f + 3) % 9 < (isHot ? 7 : 2)) {
+        c.beginPath(); c.arc(28, 290, 3, 0, Math.PI * 2); c.fillStyle = '#ff9800'; c.fill();
+    }
+
+    // ── RIGHT side — bulletin board, palette, equipment ──
+    _r(c, 240, 30, 76, 80, '#8a7350');
+    _r(c, 240, 30, 76, 2, '#9a8360');
+    _r(c, 240, 30, 2, 80, '#6a5838');
+    _r(c, 246, 36, 28, 18, '#e4dcc8');
+    _r(c, 248, 38, 24, 2, '#888'); _r(c, 248, 42, 20, 2, '#888'); _r(c, 248, 46, 16, 2, '#888');
+    _r(c, 280, 34, 28, 22, '#c8dcd0');
+    _r(c, 282, 36, 24, 2, '#666'); _r(c, 282, 40, 20, 2, '#666'); _r(c, 282, 44, 22, 2, '#666');
+    _r(c, 250, 60, 24, 24, '#ffdca0');
+    _r(c, 252, 62, 20, 2, '#886'); _r(c, 252, 66, 16, 2, '#886');
+    _r(c, 280, 62, 24, 18, '#d8c8e0');
+    _r(c, 282, 64, 20, 2, '#668'); _r(c, 282, 68, 16, 2, '#668');
+    c.beginPath(); c.arc(258, 35, 3, 0, Math.PI * 2); c.fillStyle = '#e05050'; c.fill();
+    c.beginPath(); c.arc(292, 33, 3, 0, Math.PI * 2); c.fillStyle = '#5050e0'; c.fill();
+    c.beginPath(); c.arc(260, 59, 3, 0, Math.PI * 2); c.fillStyle = '#50b050'; c.fill();
+    c.beginPath(); c.arc(290, 61, 3, 0, Math.PI * 2); c.fillStyle = '#e0e050'; c.fill();
+
+    // Color palette display
+    _r(c, 244, 118, 68, 32, '#1a1c24');
+    _r(c, 244, 118, 68, 2, '#2a2e38');
+    { const pc = ['#e05050','#e09050','#e0e050','#50e050','#50e0e0','#5050e0','#e050e0','#fff',
+                   '#802020','#804020','#808020','#208020','#208080','#202080','#802080','#888'];
+      for (let py = 0; py < 2; py++) for (let px = 0; px < 8; px++)
+          _r(c, 248 + px * 8, 122 + py * 12, 6, 10, pc[py * 8 + px]); }
+
+    // Equipment panel
+    _r(c, 244, 160, 68, 80, '#1e2028');
+    _r(c, 244, 160, 68, 2, '#363a48');
+    for (let i = 0; i < 4; i++) {
+        _r(c, 252 + i * 16, 168, 8, 8, '#282c38');
+        if ((f + i * 3) % 10 < (isHot ? 7 : 3)) {
+            c.beginPath(); c.arc(256 + i * 16, 172, 3, 0, Math.PI * 2); c.fillStyle = i % 2 === 0 ? sc : '#4caf50'; c.fill();
+        }
+    }
+    for (let i = 0; i < 3; i++) {
+        _r(c, 252, 186 + i * 16, 52, 4, '#282c38');
+        const sliderX = 252 + Math.round(20 + Math.sin(f * 0.05 + i) * 16);
+        _r(c, sliderX, 184 + i * 16, 8, 8, '#4a4e60');
+    }
+
+    // ── Monitors (5 in array) ──
+    _r(c, 60, 40, 68, 56, '#16181e'); _r(c, 60, 40, 68, 2, '#2a2e38'); _r(c, 60, 40, 2, 56, '#2a2e38');
+    _r(c, 62, 42, 64, 52, '#060a14');
+    _r(c, 90, 96, 8, 8, '#2a2e38'); _r(c, 82, 104, 24, 4, '#363a48');
+
+    _r(c, 144, 40, 68, 56, '#16181e'); _r(c, 144, 40, 68, 2, '#2a2e38'); _r(c, 144, 40, 2, 56, '#2a2e38');
+    _r(c, 146, 42, 64, 52, '#060a14');
+    _r(c, 174, 96, 8, 8, '#2a2e38'); _r(c, 166, 104, 24, 4, '#363a48');
+
+    _r(c, 60, 116, 68, 60, '#16181e'); _r(c, 60, 116, 68, 2, '#2a2e38'); _r(c, 60, 116, 2, 60, '#2a2e38');
+    _r(c, 62, 118, 64, 56, '#060a14');
+
+    _r(c, 144, 116, 90, 60, '#16181e'); _r(c, 144, 116, 90, 2, '#2a2e38'); _r(c, 144, 116, 2, 60, '#2a2e38');
+    _r(c, 146, 118, 86, 56, '#060a14');
+
+    _r(c, 72, 200, 160, 84, '#16181e'); _r(c, 72, 200, 160, 2, '#2a2e38'); _r(c, 72, 200, 2, 84, '#2a2e38');
+    _r(c, 74, 202, 156, 80, '#060a14');
+    _r(c, 144, 284, 12, 10, '#2a2e38'); _r(c, 132, 294, 36, 4, '#363a48');
+
+    // ── Screen: Heatmap (top-left) ──
+    { c.save(); c.beginPath(); c.rect(62, 42, 64, 52); c.clip();
+      for (let hy = 0; hy < 7; hy++) for (let hx = 0; hx < 8; hx++) {
+          const v = (Math.sin((hx + f * 0.15) * 0.7) * Math.cos((hy + f * 0.1) * 0.9) + 1) / 2;
+          const r = Math.round(v * 200 + 30), g = Math.round((1 - v) * 100 + 30), b = Math.round((1 - v) * 180 + 40);
+          c.globalAlpha = act ? 0.7 : 0.3;
+          _r(c, 62 + hx * 8, 42 + hy * 7, 8, 7, `rgb(${r},${g},${b})`);
+      } c.globalAlpha = 1; c.restore(); }
+
+    // ── Screen: Token stream (top-right) ──
+    { c.save(); c.beginPath(); c.rect(146, 42, 64, 52); c.clip();
+      const tc = ['#569cd6','#ce9178','#4ec9b0','#c586c0','#dcdcaa','#9cdcfe'];
+      const sp = isHot ? 4 : 1;
+      for (let i = 0; i < 16; i++) {
+          const tx = 146 + ((i * 16 - f * sp) % 80 + 80) % 80 - 12;
+          c.globalAlpha = act ? 0.7 : 0.25;
+          _r(c, tx, 46 + (i % 6) * 8, 6 + (i % 5), 5, tc[i % tc.length]);
+      } c.globalAlpha = 1; c.restore(); }
+
+    // ── Screen: Wireframe cube (middle-left) ──
+    { c.save(); c.beginPath(); c.rect(62, 118, 64, 56); c.clip();
+      const cx = 94, cy = 146, sz = 16, a = f * 0.08;
+      const co = Math.cos(a), si = Math.sin(a);
+      const vt = [[-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],[-1,-1,1],[1,-1,1],[1,1,1],[-1,1,1]];
+      const pr = vt.map(v => { const rx = v[0]*co - v[2]*si; return [cx + Math.round(rx * sz), cy + Math.round((v[1]*0.8 - (v[0]*si + v[2]*co)*0.3) * sz)]; });
+      const ed = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+      c.globalAlpha = act ? 0.7 : 0.3; c.strokeStyle = isHot ? sc : '#4ec9b0'; c.lineWidth = 1.5;
+      ed.forEach(e => { c.beginPath(); c.moveTo(pr[e[0]][0], pr[e[0]][1]); c.lineTo(pr[e[1]][0], pr[e[1]][1]); c.stroke(); });
+      pr.forEach(p => { c.beginPath(); c.arc(p[0], p[1], 2.5, 0, Math.PI * 2); c.fillStyle = isHot ? '#fff' : '#4ec9b0'; c.fill(); });
+      c.globalAlpha = 1; c.restore(); }
+
+    // ── Screen: Neural network (middle-right) ──
+    { c.save(); c.beginPath(); c.rect(146, 118, 86, 56); c.clip();
+      const layers = [3, 5, 4, 2], lx = [160, 180, 200, 220], nd = [];
+      layers.forEach((cnt, li) => { for (let ni = 0; ni < cnt; ni++) nd.push({ x: lx[li], y: 126 + (56 - cnt * 10) / 2 + ni * 10, l: li }); });
+      c.globalAlpha = act ? 0.2 : 0.08; c.strokeStyle = '#4a6080'; c.lineWidth = 1;
+      for (let i = 0; i < nd.length; i++) for (let j = i + 1; j < nd.length; j++)
+          if (nd[j].l === nd[i].l + 1) { c.beginPath(); c.moveTo(nd[i].x, nd[i].y); c.lineTo(nd[j].x, nd[j].y); c.stroke(); }
+      nd.forEach((n, i) => {
+          c.globalAlpha = act ? 0.5 + Math.sin(f * 0.15 + i * 0.7) * 0.3 : 0.3;
+          c.beginPath(); c.arc(n.x, n.y, 4, 0, Math.PI * 2); c.fillStyle = isHot ? sc : '#4ec9b0'; c.fill();
+      });
+      if (act) {
+          c.globalAlpha = 0.8;
+          const pp = (f * 3) % 60;
+          c.beginPath(); c.arc(160 + pp, 140 + Math.sin(pp * 0.2) * 8, 3, 0, Math.PI * 2); c.fillStyle = '#fff'; c.fill();
+      }
+      c.globalAlpha = 1; c.restore(); }
+
+    // ── Screen: Main — Data processing ──
+    { c.save(); c.beginPath(); c.rect(74, 202, 156, 80); c.clip();
+      _r(c, 74, 202, 156, 80, '#0c1018');
+      const sp = isHot ? 3 : 1, lH = 6, scr = (f * sp) % lH;
+      const sn = ['#569cd6','#ce9178','#dcdcaa','#c586c0','#9cdcfe','#4ec9b0','#d4d4d4'];
+      for (let i = 0; i < 16; i++) {
+          const ly = 202 + i * lH - scr; if (ly < 198 || ly > 282) continue;
+          const s = i * 37 + 13;
+          c.globalAlpha = isHot ? 0.35 : 0.18;
+          _r(c, 76, ly + 1, 8, 4, '#636369');
+          c.globalAlpha = isHot ? 0.8 : 0.4;
+          let xp = 88 + (s % 3) * 4;
+          for (let t = 0; t < 3 + (s % 2); t++) {
+              const tw = 6 + ((s + t * 11) % 20);
+              _r(c, xp, ly + 1, tw, 4, sn[(s + t) % sn.length]);
+              xp += tw + 3;
+              if (xp > 226) break;
+          }
+      }
+      if (st === 'tool') {
+          const pg = ((f * 4) % 80) / 80;
+          _r(c, 78, 272, 148, 6, '#1a1c2a');
+          _r(c, 78, 272, Math.round(148 * pg), 6, sc);
+          _r(c, 78, 272, Math.round(148 * pg), 2, '#fff');
+      }
+      if (isHot && f % 6 < 4) { c.globalAlpha = 0.9; _r(c, 100, 238, 2, 5, '#aeafad'); }
+      c.globalAlpha = 1; c.restore(); }
+
+    // ── CRT scan lines ──
+    { const sf = (f * 3) % 80; c.globalAlpha = 0.06;
+      _r(c, 62, 42 + (sf % 52), 64, 1, '#fff');
+      _r(c, 146, 42 + (sf % 52), 64, 1, '#fff');
+      _r(c, 62, 118 + (sf % 56), 64, 1, '#fff');
+      _r(c, 146, 118 + (sf % 56), 86, 1, '#fff');
+      _r(c, 74, 202 + (sf % 80), 156, 1, '#fff');
+      c.globalAlpha = 1; }
+
+    // ── Monitor glow on wall ──
+    if (act) {
+        c.globalAlpha = 0.04;
+        _r(c, 56, 28, 76, 10, sc);
+        _r(c, 140, 28, 76, 10, sc);
+        c.globalAlpha = 1;
+    }
+
+    // ── Desk ──
+    _r(c, 52, 300, 216, 6, '#6a5a3e');
+    _r(c, 52, 300, 216, 2, '#7a6a4e');
+    _r(c, 52, 306, 216, 28, '#4a3c2a');
+    _r(c, 52, 333, 216, 2, '#3a2e1e');
+    _r(c, 58, 336, 6, 54, '#4a3c2a');
+    _r(c, 256, 336, 6, 54, '#4a3c2a');
+
+    // Keyboard
+    _r(c, 108, 301, 52, 10, '#26262e');
+    _r(c, 108, 301, 52, 2, '#3a3a44');
+    for (let kx = 0; kx < 9; kx++) for (let ky = 0; ky < 3; ky++)
+        _r(c, 111 + kx * 5, 303 + ky * 3, 4, 2, '#404050');
+    _r(c, 170, 303, 8, 8, '#2a2a34');
+    _r(c, 172, 303, 4, 4, '#3a3a44');
+
+    // ── Coffee mug ──
+    _r(c, 68, 290, 10, 12, '#8b6e4e');
+    _r(c, 77, 294, 5, 6, '#8b6e4e');
+    _r(c, 79, 295, 3, 2, '#0a0c16');
+    _r(c, 68, 290, 10, 2, '#aaa');
+    if (f % 20 < 14) {
+        c.globalAlpha = 0.3;
+        _r(c, 71 + (f % 3), 284 - (f % 6), 3, 3, '#fff');
+        _r(c, 74 - (f % 2), 280 - (f % 5), 2, 3, '#fff');
+        c.globalAlpha = 1;
+    }
+
+    // ── Character (AI researcher — behind view) ──
+    { const cx = 188, by = 264, br = st === 'idle' ? Math.round(Math.sin(f * 0.07) * 1) : 0;
+      _r(c, cx - 10, by + br, 20, 10, '#2a1a0e');
+      _r(c, cx - 12, by + 4 + br, 24, 8, '#1e140a');
+      _r(c, cx + 10, by + 8 + br, 6, 16, '#2a1a0e');
+      _r(c, cx + 12, by + 16 + br, 4, 12, '#1e140a');
+      _r(c, cx - 14, by + 6 + br, 4, 6, '#c49460');
+      _r(c, cx + 10, by + 6 + br, 4, 6, '#c49460');
+      _r(c, cx - 8, by + 12 + br, 16, 6, '#c49460');
+      _r(c, cx - 6, by + 18 + br, 12, 6, '#b08450');
+
+      _r(c, cx - 12, by - 2 + br, 24, 4, '#2a2a34');
+      _r(c, cx - 16, by + 4 + br, 6, 10, '#2a2a34');
+      _r(c, cx + 10, by + 4 + br, 6, 10, '#2a2a34');
+
+      _r(c, cx - 32, by + 24 + br, 68, 10, '#444e36');
+      _r(c, cx - 32, by + 24 + br, 68, 2, '#5a6848');
+      _r(c, cx - 10, by + 24 + br, 20, 6, '#6a785a');
+
+      _r(c, cx - 28, by + 34 + br, 60, 44, '#5a6848');
+      _r(c, cx - 28, by + 34 + br, 8, 20, '#4a5838');
+      _r(c, cx + 20, by + 34 + br, 8, 20, '#4a5838');
+      _r(c, cx - 1, by + 34 + br, 2, 44, '#444e36');
+      _r(c, cx - 28, by + 77 + br, 60, 2, '#3e4a32');
+
+      _r(c, cx - 24, by + 79 + br, 52, 28, '#2a2a34');
+      _r(c, cx - 20, by + 107 + br, 44, 10, '#222230');
+
+      const tp = st === 'typing', th = st === 'thinking', dn = st === 'done';
+      const lw = tp ? [0,-2,0,2][f%4] : 0, rw = tp ? [2,0,-2,0][f%4] : 0;
+      if (dn) {
+          _r(c, cx-40, by+12, 10, 24, '#444e36'); _r(c, cx-42, by+4, 8, 12, '#5a6848'); _r(c, cx-42, by, 6, 6, '#c49460');
+          _r(c, cx+30, by+12, 10, 24, '#444e36'); _r(c, cx+32, by+4, 8, 12, '#5a6848'); _r(c, cx+36, by, 6, 6, '#c49460');
+      } else if (th) {
+          _r(c, cx-34, by+28, 8, 28, '#444e36'); _r(c, cx-38, by+24, 8, 8, '#5a6848'); _r(c, cx-40, by+24, 6, 4, '#c49460');
+          const tf = [0,1,2,1][f%4];
+          _r(c, cx+26, by+28, 8, 16-tf*4, '#444e36'); _r(c, cx+24, by+12+(4-tf*2), 10, 12, '#5a6848'); _r(c, cx+22, by+8+(4-tf*2), 6, 6, '#c49460');
+      } else {
+          _r(c, cx-34, by+28, 8, 24+lw, '#444e36'); _r(c, cx-40, by+26, 10, 6, '#5a6848'); _r(c, cx-44, by+24+lw, 6, 4, '#c49460');
+          _r(c, cx+26, by+28, 8, 24+rw, '#444e36'); _r(c, cx+32, by+26, 10, 6, '#5a6848'); _r(c, cx+40, by+24+rw, 6, 4, '#c49460');
+      }
+    }
+
+    // ── Chair ──
+    _r(c, 142, 370, 8, 36, '#1e1e2a'); _r(c, 230, 370, 8, 36, '#1e1e2a');
+    _r(c, 142, 370, 8, 2, '#2e2e40'); _r(c, 230, 370, 8, 2, '#2e2e40');
+    _r(c, 148, 400, 84, 10, '#242434'); _r(c, 148, 400, 84, 2, '#2e2e40');
+    _r(c, 182, 410, 16, 16, '#1e1e2a'); _r(c, 166, 424, 48, 4, '#2a2c36');
+    _r(c, 162, 428, 8, 6, '#1a1c24'); _r(c, 210, 428, 8, 6, '#1a1c24');
+
+    // ── HYDRA server (floor, left side) ──
+    _r(c, 10, 420, 80, 64, '#2a2c3a');
+    _r(c, 10, 420, 80, 2, '#3a3e4e');
+    _r(c, 10, 420, 2, 64, '#3a3e4e');
+    _r(c, 14, 426, 72, 16, '#222430');
+    _r(c, 14, 446, 72, 16, '#222430');
+    _r(c, 14, 466, 72, 12, '#222430');
+    c.font = 'bold 9px monospace'; c.fillStyle = '#4a6080'; c.fillText('HYDRA', 26, 438);
+    for (let i = 0; i < 8; i++) {
+        if ((f + i * 4) % 12 < (isHot ? 9 : 4)) {
+            c.beginPath(); c.arc(20 + i * 9, 454, 3, 0, Math.PI * 2); c.fillStyle = i % 2 === 0 ? sc : '#4caf50'; c.fill();
+        }
+        if ((f + i * 3 + 5) % 14 < (isHot ? 8 : 3)) {
+            c.beginPath(); c.arc(20 + i * 9, 472, 3, 0, Math.PI * 2); c.fillStyle = '#4caf50'; c.fill();
+        }
+    }
+
+    // ── Floor ──
+    {
+        const floorG = c.createLinearGradient(0, 400, 0, 520);
+        floorG.addColorStop(0, '#0e1018');
+        floorG.addColorStop(1, '#08090e');
+        c.fillStyle = floorG;
+        c.fillRect(0, 400, 320, 120);
+    }
+    for (let i = 0; i < 6; i++) _r(c, 0, 410 + i * 18, 320, 1, '#12141e');
+    _r(c, 120, 416, 80, 2, '#12121e'); _r(c, 120, 416, 2, 40, '#12121e');
+    _r(c, 200, 430, 2, 30, '#12121e'); _r(c, 160, 460, 60, 2, '#12121e');
+    _r(c, 220, 440, 60, 2, '#12121e'); _r(c, 280, 440, 2, 40, '#12121e');
+    _r(c, 120, 490, 160, 2, '#12121e'); _r(c, 80, 450, 2, 40, '#12121e');
+
+    // ── Title bar ──
+    _r(c, 0, 0, 320, 24, '#0a0c14');
+    _r(c, 0, 22, 320, 2, '#1a1c2a');
+    c.font = 'bold 11px monospace'; c.fillStyle = '#8a8aaa'; c.fillText('AI WORKSTATION', 8, 16);
+    c.beginPath(); c.arc(216, 12, 5, 0, Math.PI * 2); c.fillStyle = sc; c.fill();
+    if (act) { c.globalAlpha = 0.4; c.beginPath(); c.arc(216, 12, 8, 0, Math.PI * 2); c.fillStyle = sc; c.fill(); c.globalAlpha = 1; }
+    c.font = '10px monospace'; c.fillStyle = '#6a6a8a'; c.fillText('[' + _stLabel(st) + ']', 230, 16);
+
+    // ── Ambient effects ──
+    if (isHot) { c.globalAlpha = 0.04; _r(c, 56, 28, 168, 12, sc); c.globalAlpha = 0.03; _r(c, 80, 404, 160, 28, sc); c.globalAlpha = 1; }
+    if (st === 'done') { c.globalAlpha = 0.06 + Math.sin(f * 0.2) * 0.03; _r(c, 0, 0, _GW, _GH, '#4caf50'); c.globalAlpha = 1; }
+
+    // ── Blit ──
+    const dc = cv.getContext('2d');
+    dc.imageSmoothingEnabled = true;
+    dc.clearRect(0, 0, cv.width, cv.height);
+    dc.drawImage(_offAIProc, 0, 0, cv.width, cv.height);
 }
 
 // ─── Event stream ───────────────────────────────────────────────────────────
@@ -4874,6 +5694,8 @@ select.mc-input { cursor: pointer; }
 }
 
 /* ─── 16-Bit Pixel Art Workshop ─── */
+.mc-pixel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.mc-pixel-style-select { width: auto; max-width: 220px; font-size: 0.78rem; padding: 4px 8px; }
 .mc-pixel-section { background: #111118; border: 1px solid #1a1a24; border-radius: 10px; padding: 12px; margin-top: 16px; overflow: hidden; }
 .mc-pixel-stage { display: flex; align-items: center; justify-content: center; gap: 0; position: relative; border-radius: 8px; border: 1px solid #1a1a24; overflow: hidden; background: #080810; }
 .mc-pixel-stage::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.06) 3px, rgba(0,0,0,0.06) 6px); z-index: 10; mix-blend-mode: multiply; border-radius: 8px; }
