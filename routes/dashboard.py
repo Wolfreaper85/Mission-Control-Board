@@ -590,3 +590,150 @@ def launch_plugin(**kwargs):
     except Exception as e:
         logger.error(f"Mission Control launch_plugin error: {e}")
         return {"success": False, "error": str(e)}
+
+
+# ─── Notes ────────────────────────────────────────────────────────────────────
+
+def _ensure_notes_table():
+    """Create notes table if it doesn't exist."""
+    db_path = _goals_db()
+    if not db_path.exists():
+        return False
+    try:
+        conn = _connect(db_path)
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                scope TEXT NOT NULL DEFAULT 'default',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_notes_scope ON notes(scope)')
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Notes table init error: {e}")
+        return False
+
+
+def get_notes(**kwargs):
+    """List all notes, optionally filtered by scope or search query."""
+    query_params = kwargs.get("query", {})
+    scope = query_params.get("scope", "default")
+    search = query_params.get("search", "").strip()
+
+    if not _ensure_notes_table():
+        return {"notes": []}
+
+    try:
+        conn = _connect(_goals_db())
+        if search:
+            rows = conn.execute(
+                "SELECT * FROM notes WHERE scope IN (?, 'global') AND (title LIKE ? OR content LIKE ?) ORDER BY created_at DESC",
+                (scope, f"%{search}%", f"%{search}%")
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM notes WHERE scope IN (?, 'global') ORDER BY created_at DESC",
+                (scope,)
+            ).fetchall()
+        conn.close()
+        return {"notes": [dict(r) for r in rows]}
+    except Exception as e:
+        logger.error(f"get_notes error: {e}")
+        return {"notes": [], "error": str(e)}
+
+
+def create_note(**kwargs):
+    """Create a new note."""
+    body = kwargs.get("body", {})
+    title = body.get("title", "").strip()
+    content = body.get("content", "").strip()
+
+    if not title:
+        return {"error": "Title is required"}
+    if not content:
+        return {"error": "Content is required"}
+
+    scope = body.get("scope", "default")
+
+    if not _ensure_notes_table():
+        return {"error": "Database not initialized"}
+
+    try:
+        conn = _connect(_goals_db())
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO notes (title, content, scope) VALUES (?, ?, ?)",
+            (title[:200], content[:2000], scope)
+        )
+        conn.commit()
+        note_id = cursor.lastrowid
+        conn.close()
+        return {"success": True, "id": note_id}
+    except Exception as e:
+        logger.error(f"create_note error: {e}")
+        return {"error": str(e)}
+
+
+def delete_note(**kwargs):
+    """Delete a single note by ID."""
+    body = kwargs.get("body", {})
+    note_id = body.get("note_id")
+    if not note_id:
+        return {"error": "note_id is required"}
+
+    try:
+        conn = _connect(_goals_db())
+        conn.execute("DELETE FROM notes WHERE id = ?", (int(note_id),))
+        conn.commit()
+        conn.close()
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"delete_note error: {e}")
+        return {"error": str(e)}
+
+
+def clear_notes(**kwargs):
+    """Delete all notes (with optional scope filter)."""
+    body = kwargs.get("body", {})
+    scope = body.get("scope", "default")
+
+    try:
+        conn = _connect(_goals_db())
+        conn.execute("DELETE FROM notes WHERE scope IN (?, 'global')", (scope,))
+        conn.commit()
+        conn.close()
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"clear_notes error: {e}")
+        return {"error": str(e)}
+
+
+def search_notes(**kwargs):
+    """Search notes by keyword — used by AI tools."""
+    query_params = kwargs.get("query", {})
+    q = query_params.get("q", "").strip()
+    scope = query_params.get("scope", "default")
+
+    if not q:
+        return {"notes": [], "error": "Search query is required"}
+
+    if not _ensure_notes_table():
+        return {"notes": []}
+
+    try:
+        conn = _connect(_goals_db())
+        rows = conn.execute(
+            "SELECT * FROM notes WHERE scope IN (?, 'global') AND (title LIKE ? OR content LIKE ?) ORDER BY created_at DESC LIMIT 20",
+            (scope, f"%{q}%", f"%{q}%")
+        ).fetchall()
+        conn.close()
+        return {"notes": [dict(r) for r in rows]}
+    except Exception as e:
+        logger.error(f"search_notes error: {e}")
+        return {"notes": [], "error": str(e)}

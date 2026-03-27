@@ -618,7 +618,7 @@ function _buildLayout() {
                 <div class="mc-header-left">
                     <button class="mc-back-btn" id="mc-back-to-launcher" title="Back to apps">\u{2B05}\u{FE0F}</button>
                     <h1 class="mc-greeting">${greeting}</h1>
-                    <p class="mc-date">${dateStr} &middot; <span id="mc-tasks-remaining">0 tasks remaining</span></p>
+                    <p class="mc-date">${dateStr} &middot; <span id="mc-live-clock"></span> &middot; <span id="mc-tasks-remaining">0 tasks remaining</span></p>
                 </div>
                 <div class="mc-header-right">
                     <div class="mc-agent-status" id="mc-agent-badge">
@@ -812,6 +812,21 @@ function _buildLayout() {
                 </div>
             </div>
 
+            <!-- Notes -->
+            <div class="mc-notes-section" id="mc-notes-section">
+                <div class="mc-board-header">
+                    <h2 class="mc-section-title">\u{1F4DD} Notes</h2>
+                    <div class="mc-notes-actions">
+                        <input type="text" class="mc-input mc-notes-search" id="mc-notes-search" placeholder="Search notes...">
+                        <button class="mc-btn mc-btn-sm" id="mc-note-new">\u{2795} New Note</button>
+                        <button class="mc-clear-all-btn" id="mc-notes-clear" title="Delete all notes">\u{1F5D1}\u{FE0F} Clear All</button>
+                    </div>
+                </div>
+                <div class="mc-notes-grid" id="mc-notes-grid">
+                    <div class="mc-empty-sm">No notes yet</div>
+                </div>
+            </div>
+
             <!-- Schedule Calendar -->
             <div class="mc-calendar-section" id="mc-calendar-section">
                 <div class="mc-board-header">
@@ -952,6 +967,26 @@ function _buildLayout() {
                 <button class="mc-btn mc-btn-danger" id="mc-sched-remove" style="display:none;margin-right:auto">\u{1F5D1}\u{FE0F} Remove Schedule</button>
                 <button class="mc-btn" id="mc-sched-cancel">Cancel</button>
                 <button class="mc-btn mc-btn-accent" id="mc-sched-save">\u{23F0} Schedule</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Note Modal -->
+    <div class="mc-modal-overlay" id="mc-note-modal" style="display:none">
+        <div class="mc-modal">
+            <div class="mc-modal-header">
+                <h3>\u{1F4DD} New Note</h3>
+                <button class="mc-modal-close" id="mc-note-modal-close">\u{2715}</button>
+            </div>
+            <div class="mc-modal-body">
+                <label class="mc-label">Title</label>
+                <input class="mc-input" id="mc-note-title" placeholder="Note title..." maxlength="200">
+                <label class="mc-label">Content</label>
+                <textarea class="mc-input mc-textarea" id="mc-note-content" placeholder="Write your note here..." rows="6" maxlength="2000"></textarea>
+            </div>
+            <div class="mc-modal-footer">
+                <button class="mc-btn" id="mc-note-cancel">Cancel</button>
+                <button class="mc-btn mc-btn-accent" id="mc-note-save">\u{1F4BE} Save Note</button>
             </div>
         </div>
     </div>
@@ -1737,11 +1772,20 @@ async function _cancelStream() {
 
 // ─── Data loading ───────────────────────────────────────────────────────────
 
+function _updateClock() {
+    const el = document.getElementById('mc-live-clock');
+    if (el) el.textContent = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+}
+
 function _loadAll() {
+    _updateClock();
+    if (!window._mcClockInterval) window._mcClockInterval = setInterval(_updateClock, 1000);
     _checkScheduleStamps();
     _loadGoalSchedules().then(() => _loadGoals());
     _loadStats();
     _loadAgents();
+    if (!window._mcNotesInit) { window._mcNotesInit = true; _initNotes(); }
+    else { _loadNotes(); }
 }
 
 async function _checkScheduleStamps() {
@@ -2380,6 +2424,132 @@ function _renderBoard(goals) {
                 _loadGoals(); _loadStats();
             } catch (e) { console.error('[MC] Clear completed failed:', e); }
         };
+    }
+}
+
+// ─── Notes ──────────────────────────────────────────────────────────────────
+
+let _notesCache = [];
+
+function _loadNotes(search) {
+    const url = search
+        ? `/api/plugin/mission-control/notes?search=${encodeURIComponent(search)}`
+        : '/api/plugin/mission-control/notes';
+    fetch(url, { headers: { 'X-CSRF-Token': CSRF() } })
+        .then(r => r.json())
+        .then(data => { _notesCache = data.notes || []; _renderNotes(); })
+        .catch(e => console.error('[MC] Notes load error:', e));
+}
+
+function _renderNotes() {
+    const grid = document.getElementById('mc-notes-grid');
+    if (!grid) return;
+
+    if (_notesCache.length === 0) {
+        grid.innerHTML = '<div class="mc-empty-sm">No notes yet — create one or ask the AI to take a note for you</div>';
+        return;
+    }
+
+    grid.innerHTML = _notesCache.map(n => {
+        const d = new Date(n.created_at + 'Z');
+        const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        return `<div class="mc-note-card" data-id="${n.id}">
+            <div class="mc-note-header">
+                <span class="mc-note-title">${_escHtml(n.title)}</span>
+                <button class="mc-card-btn mc-note-del" data-id="${n.id}" title="Delete">\u{1F5D1}\u{FE0F}</button>
+            </div>
+            <div class="mc-note-stamp">${dateStr} at ${timeStr}</div>
+            <div class="mc-note-body">${_escHtml(n.content)}</div>
+        </div>`;
+    }).join('');
+
+    grid.querySelectorAll('.mc-note-del').forEach(btn => {
+        btn.addEventListener('click', async e => {
+            e.stopPropagation();
+            if (!confirm('Delete this note?')) return;
+            try {
+                await fetch('/api/plugin/mission-control/notes/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                    body: JSON.stringify({ note_id: parseInt(btn.dataset.id) })
+                });
+                _loadNotes();
+            } catch (err) { console.error('[MC] Note delete error:', err); }
+        });
+    });
+}
+
+function _escHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+}
+
+function _initNotes() {
+    _loadNotes();
+
+    // New Note button
+    const newBtn = document.getElementById('mc-note-new');
+    if (newBtn) {
+        newBtn.addEventListener('click', () => {
+            document.getElementById('mc-note-title').value = '';
+            document.getElementById('mc-note-content').value = '';
+            document.getElementById('mc-note-modal').style.display = 'flex';
+        });
+    }
+
+    // Note modal close/cancel
+    const closeNote = () => { document.getElementById('mc-note-modal').style.display = 'none'; };
+    const closeBtn = document.getElementById('mc-note-modal-close');
+    const cancelBtn = document.getElementById('mc-note-cancel');
+    if (closeBtn) closeBtn.addEventListener('click', closeNote);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeNote);
+
+    // Save note
+    const saveBtn = document.getElementById('mc-note-save');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', async () => {
+            const title = document.getElementById('mc-note-title').value.trim();
+            const content = document.getElementById('mc-note-content').value.trim();
+            if (!title || !content) { alert('Both title and content are required.'); return; }
+            try {
+                await fetch('/api/plugin/mission-control/notes/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                    body: JSON.stringify({ title, content })
+                });
+                closeNote();
+                _loadNotes();
+            } catch (e) { console.error('[MC] Note save error:', e); }
+        });
+    }
+
+    // Search
+    const searchInput = document.getElementById('mc-notes-search');
+    let _noteSearchTimeout;
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            clearTimeout(_noteSearchTimeout);
+            _noteSearchTimeout = setTimeout(() => _loadNotes(searchInput.value.trim()), 300);
+        });
+    }
+
+    // Clear all
+    const clearAllBtn = document.getElementById('mc-notes-clear');
+    if (clearAllBtn) {
+        clearAllBtn.addEventListener('click', async () => {
+            if (_notesCache.length === 0) return;
+            if (!confirm(`Delete all ${_notesCache.length} note(s)?`)) return;
+            try {
+                await fetch('/api/plugin/mission-control/notes/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                    body: JSON.stringify({})
+                });
+                _loadNotes();
+            } catch (e) { console.error('[MC] Notes clear error:', e); }
+        });
     }
 }
 
@@ -4633,6 +4803,21 @@ function _injectStyles() {
 .mc-day-btn.mc-day-active { background: #4fc3f7; color: #0a0a0f; border-color: #4fc3f7; }
 
 /* Schedule Calendar */
+.mc-notes-section { background: #111118; border: 1px solid #1a1a24; border-radius: 10px; padding: 16px 20px; margin-top: 16px; }
+.mc-notes-actions { display: flex; gap: 8px; align-items: center; }
+.mc-notes-search { width: 180px; padding: 5px 10px; font-size: 0.78rem; background: #0d0d14; border: 1px solid #2a2a3a; color: #ccc; border-radius: 6px; }
+.mc-notes-search:focus { border-color: #4fc3f7; outline: none; }
+.mc-notes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.mc-note-card { background: #0d0d14; border: 1px solid #1a1a24; border-radius: 8px; padding: 12px 14px; transition: border-color 0.2s; }
+.mc-note-card:hover { border-color: #2a2a3a; }
+.mc-note-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.mc-note-title { font-weight: 600; color: #e0e0e0; font-size: 0.88rem; line-height: 1.3; }
+.mc-note-stamp { font-size: 0.7rem; color: #666; margin: 4px 0 8px; }
+.mc-note-body { font-size: 0.8rem; color: #999; line-height: 1.5; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto; }
+.mc-note-body::-webkit-scrollbar { width: 4px; }
+.mc-note-body::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+.mc-btn-sm { font-size: 0.75rem; padding: 4px 10px; }
+.mc-textarea { resize: vertical; min-height: 100px; font-family: inherit; }
 .mc-calendar-section { background: #111118; border: 1px solid #1a1a24; border-radius: 10px; padding: 16px 20px; margin-top: 16px; }
 .mc-week-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 16px; }
 .mc-cal-day { background: #0d0d14; border: 1px solid #1a1a24; border-radius: 8px; padding: 8px; min-height: 80px; }

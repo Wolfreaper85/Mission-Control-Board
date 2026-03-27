@@ -58,6 +58,31 @@
                 "method": "POST",
                 "path": "launch",
                 "handler": "routes/dashboard.py:launch_plugin"
+            },
+            {
+                "method": "GET",
+                "path": "notes",
+                "handler": "routes/dashboard.py:get_notes"
+            },
+            {
+                "method": "POST",
+                "path": "notes/create",
+                "handler": "routes/dashboard.py:create_note"
+            },
+            {
+                "method": "POST",
+                "path": "notes/delete",
+                "handler": "routes/dashboard.py:delete_note"
+            },
+            {
+                "method": "POST",
+                "path": "notes/clear",
+                "handler": "routes/dashboard.py:clear_notes"
+            },
+            {
+                "method": "GET",
+                "path": "notes/search",
+                "handler": "routes/dashboard.py:search_notes"
             }
         ]
     }

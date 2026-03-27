@@ -4,7 +4,7 @@
 ENABLED = True
 EMOJI = '\U0001f3af'
 
-AVAILABLE_FUNCTIONS = ['mission_status']
+AVAILABLE_FUNCTIONS = ['mission_status', 'take_note', 'search_notes', 'list_notes']
 
 TOOLS = [
     {
@@ -24,6 +24,72 @@ TOOLS = [
                 "required": []
             }
         }
+    },
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "take_note",
+            "description": "Save a note to Mission Control's Notes board. Use when the user says 'take a note', 'remember this', 'note this down', 'save this for later', or similar. Always ask for or infer a short title and the note content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short title for the note (max 200 chars)"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The note content/body (max 2000 chars)"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Scope for the note (default: 'default')"
+                    }
+                },
+                "required": ["title", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "search_notes",
+            "description": "Search through saved notes in Mission Control. Use when the user says 'check my notes', 'find that note about...', 'do I have a note on...', 'look up my notes', or similar. Searches both title and content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search keyword or phrase to find in note titles and content"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Scope to search in (default: 'default')"
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "list_notes",
+            "description": "List all saved notes in Mission Control. Use when the user says 'show my notes', 'what notes do I have', 'list all notes', or similar.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "description": "Scope to list (default: 'default')"
+                    }
+                },
+                "required": []
+            }
+        }
     }
 ]
 
@@ -32,6 +98,12 @@ def execute(function_name, arguments, config):
     """Execute mission control tool functions."""
     if function_name == "mission_status":
         return _mission_status(arguments, config)
+    elif function_name == "take_note":
+        return _take_note(arguments, config)
+    elif function_name == "search_notes":
+        return _search_notes(arguments, config)
+    elif function_name == "list_notes":
+        return _list_notes(arguments, config)
     return "Unknown function", False
 
 
@@ -131,3 +203,115 @@ def _mission_status(arguments, config):
     lines.append("\n*Open Mission Control in the sidebar for the full dashboard.*")
 
     return "\n".join(lines), True
+
+
+def _take_note(arguments, config):
+    """Create a note in Mission Control."""
+    import sqlite3
+    from pathlib import Path
+    from datetime import datetime
+
+    title = arguments.get("title", "").strip()
+    content = arguments.get("content", "").strip()
+    scope = arguments.get("scope", "default")
+
+    if not title or not content:
+        return "Error: Both title and content are required to take a note.", False
+
+    goals_db = Path(__file__).parent.parent.parent.parent / "user" / "goals.db"
+    if not goals_db.exists():
+        return "Error: Database not initialized. Send a message in chat first.", False
+
+    try:
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL,
+                scope TEXT NOT NULL DEFAULT 'default',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute(
+            "INSERT INTO notes (title, content, scope) VALUES (?, ?, ?)",
+            (title[:200], content[:2000], scope)
+        )
+        conn.commit()
+        conn.close()
+        return f"\U0001f4dd **Note saved!**\n**Title:** {title}\n**Content:** {content[:100]}{'...' if len(content) > 100 else ''}\n\n*View it in Mission Control → Notes*", True
+    except Exception as e:
+        return f"Error saving note: {e}", False
+
+
+def _search_notes(arguments, config):
+    """Search notes by keyword."""
+    import sqlite3
+    from pathlib import Path
+
+    query = arguments.get("query", "").strip()
+    scope = arguments.get("scope", "default")
+
+    if not query:
+        return "Please provide a search term to look for in your notes.", False
+
+    goals_db = Path(__file__).parent.parent.parent.parent / "user" / "goals.db"
+    if not goals_db.exists():
+        return "No notes found — database not initialized.", True
+
+    try:
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM notes WHERE scope IN (?, 'global') AND (title LIKE ? OR content LIKE ?) ORDER BY created_at DESC LIMIT 10",
+            (scope, f"%{query}%", f"%{query}%")
+        ).fetchall()
+        conn.close()
+
+        if not rows:
+            return f"\U0001f50d No notes found matching \"{query}\".", True
+
+        lines = [f"\U0001f50d **Found {len(rows)} note(s) matching \"{query}\":**\n"]
+        for r in rows:
+            ts = r["created_at"] or ""
+            lines.append(f"**[{r['id']}] {r['title']}** ({ts})")
+            lines.append(f"  {r['content'][:200]}{'...' if len(r['content']) > 200 else ''}\n")
+
+        return "\n".join(lines), True
+    except Exception as e:
+        return f"Error searching notes: {e}", False
+
+
+def _list_notes(arguments, config):
+    """List all notes."""
+    import sqlite3
+    from pathlib import Path
+
+    scope = arguments.get("scope", "default")
+
+    goals_db = Path(__file__).parent.parent.parent.parent / "user" / "goals.db"
+    if not goals_db.exists():
+        return "No notes yet. Say 'take a note' to create one!", True
+
+    try:
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM notes WHERE scope IN (?, 'global') ORDER BY created_at DESC",
+            (scope,)
+        ).fetchall()
+        conn.close()
+
+        if not rows:
+            return "\U0001f4dd **No notes yet.** Say 'take a note' to create one!", True
+
+        lines = [f"\U0001f4dd **Your Notes ({len(rows)}):**\n"]
+        for r in rows:
+            ts = r["created_at"] or ""
+            lines.append(f"**[{r['id']}] {r['title']}** ({ts})")
+            lines.append(f"  {r['content'][:150]}{'...' if len(r['content']) > 150 else ''}\n")
+
+        return "\n".join(lines), True
+    except Exception as e:
+        return f"Error listing notes: {e}", False
