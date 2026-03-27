@@ -1778,14 +1778,17 @@ function _updateClock() {
 }
 
 function _loadAll() {
-    _updateClock();
+    try { _updateClock(); } catch(e) { console.error('[MC] Clock error:', e); }
     if (!window._mcClockInterval) window._mcClockInterval = setInterval(_updateClock, 1000);
-    _checkScheduleStamps();
-    _loadGoalSchedules().then(() => _loadGoals());
-    _loadStats();
-    _loadAgents();
-    if (!window._mcNotesInit) { window._mcNotesInit = true; _initNotes(); }
-    else { _loadNotes(); }
+    try { _checkScheduleStamps(); } catch(e) { console.error('[MC] Schedule stamps error:', e); }
+    try { _loadGoalSchedules().catch(e => { console.error('[MC] Goal schedules error:', e); }); } catch(e) { /* ignore */ }
+    try { _loadGoalsNow(); } catch(e) { console.error('[MC] Goals error:', e); }
+    try { _loadStats(); } catch(e) { console.error('[MC] Stats error:', e); }
+    try { _loadAgents(); } catch(e) { console.error('[MC] Agents error:', e); }
+    try {
+        if (!window._mcNotesInit) { window._mcNotesInit = true; _initNotes(); }
+        else { _loadNotes(); }
+    } catch(e) { console.error('[MC] Notes error:', e); }
 }
 
 async function _checkScheduleStamps() {
@@ -1814,13 +1817,13 @@ async function _loadGoalsNow() {
         const resp = await fetch(`/api/plugin/mission-control/goals?scope=${encodeURIComponent(scope)}`, {
             headers: { 'X-CSRF-Token': CSRF() }
         });
-        if (resp.status === 429) { console.warn('[MC] Goals rate-limited, retrying...'); setTimeout(_loadGoalsNow, 2000); return; }
-        if (!resp.ok) return; // Don't clear cache on errors
+        if (resp.status === 429) { setTimeout(_loadGoalsNow, 2000); return; }
+        if (!resp.ok) return;
         const data = await resp.json();
         _goalsCache = data.goals || [];
         _renderBoard(_goalsCache);
         _renderCharts(_goalsCache);
-        _updateImpact(); // Recalc impact now that goals are loaded
+        _updateImpact();
     } catch (e) {
         console.error('[MC] Failed to load goals:', e);
     }

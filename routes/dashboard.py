@@ -13,11 +13,19 @@ logger = logging.getLogger(__name__)
 
 def _goals_db():
     """Path to Sapphire's goals database."""
+    for i in range(6):
+        candidate = Path(__file__).parents[i] / "user" / "goals.db"
+        if candidate.exists():
+            return candidate
     return Path(__file__).parent.parent.parent.parent / "user" / "goals.db"
 
 
 def _memory_db():
     """Path to Sapphire's memory database."""
+    for i in range(6):
+        candidate = Path(__file__).parents[i] / "user" / "memory.db"
+        if candidate.exists():
+            return candidate
     return Path(__file__).parent.parent.parent.parent / "user" / "memory.db"
 
 

@@ -1,6 +1,16 @@
 # tools/mission.py
 # Chat-accessible tools for Mission Control
 
+from pathlib import Path
+
+def _find_goals_db():
+    """Find goals.db regardless of whether we run from plugins/ or user/plugins/."""
+    for i in range(6):
+        candidate = Path(__file__).parents[i] / "user" / "goals.db"
+        if candidate.exists():
+            return candidate
+    return Path(__file__).parent.parent.parent.parent / "user" / "goals.db"
+
 ENABLED = True
 EMOJI = '\U0001f3af'
 
@@ -116,7 +126,7 @@ def _mission_status(arguments, config):
     lines = ["\U0001f3af **Mission Control Status**\n"]
 
     # Goals summary
-    goals_db = Path(__file__).parent.parent.parent.parent / "user" / "goals.db"
+    goals_db = _find_goals_db()
     if goals_db.exists():
         try:
             conn = sqlite3.connect(str(goals_db), timeout=5)
@@ -218,7 +228,7 @@ def _take_note(arguments, config):
     if not title or not content:
         return "Error: Both title and content are required to take a note.", False
 
-    goals_db = Path(__file__).parent.parent.parent.parent / "user" / "goals.db"
+    goals_db = _find_goals_db()
     if not goals_db.exists():
         return "Error: Database not initialized. Send a message in chat first.", False
 
@@ -256,7 +266,7 @@ def _search_notes(arguments, config):
     if not query:
         return "Please provide a search term to look for in your notes.", False
 
-    goals_db = Path(__file__).parent.parent.parent.parent / "user" / "goals.db"
+    goals_db = _find_goals_db()
     if not goals_db.exists():
         return "No notes found — database not initialized.", True
 
@@ -290,7 +300,7 @@ def _list_notes(arguments, config):
 
     scope = arguments.get("scope", "default")
 
-    goals_db = Path(__file__).parent.parent.parent.parent / "user" / "goals.db"
+    goals_db = _find_goals_db()
     if not goals_db.exists():
         return "No notes yet. Say 'take a note' to create one!", True
 
