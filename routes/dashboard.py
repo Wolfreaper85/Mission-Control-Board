@@ -745,3 +745,292 @@ def search_notes(**kwargs):
     except Exception as e:
         logger.error(f"search_notes error: {e}")
         return {"notes": [], "error": str(e)}
+
+
+# ─── Self-Reflection: Shared plugin.py loader ────────────────────────────────
+
+def _load_reflection():
+    """Load plugin.py for self-reflection data access."""
+    import importlib.util
+    import sys
+    plugin_file = Path(__file__).parent.parent / "plugin.py"
+    spec = importlib.util.spec_from_file_location("_mc_reflection_plugin", plugin_file)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["_mc_reflection_plugin"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+# ─── Corrections ─────────────────────────────────────────────────────────────
+
+async def get_corrections(**kwargs):
+    """List detected corrections."""
+    query = kwargs.get("query", {})
+    scope = query.get("scope", "default")
+    limit = int(query.get("limit", 50))
+    try:
+        plugin = _load_reflection()
+        corrections = plugin.get_corrections(scope=scope, limit=limit)
+        return {"corrections": corrections}
+    except Exception as e:
+        logger.error(f"get_corrections error: {e}")
+        return {"corrections": [], "error": str(e)}
+
+
+async def delete_correction(**kwargs):
+    """Delete a correction by ID."""
+    body = kwargs.get("body", {})
+    cid = body.get("id")
+    if not cid:
+        return {"error": "id is required"}
+    try:
+        plugin = _load_reflection()
+        ok = plugin.delete_correction(cid)
+        return {"success": ok}
+    except Exception as e:
+        logger.error(f"delete_correction error: {e}")
+        return {"error": str(e)}
+
+
+# ─── Reflections ─────────────────────────────────────────────────────────────
+
+async def get_reflections(**kwargs):
+    """List self-reflections."""
+    query = kwargs.get("query", {})
+    scope = query.get("scope", "default")
+    limit = int(query.get("limit", 50))
+    try:
+        plugin = _load_reflection()
+        reflections = plugin.get_reflections(scope=scope, limit=limit)
+        return {"reflections": reflections}
+    except Exception as e:
+        logger.error(f"get_reflections error: {e}")
+        return {"reflections": [], "error": str(e)}
+
+
+async def delete_reflection(**kwargs):
+    """Delete a reflection by ID."""
+    body = kwargs.get("body", {})
+    rid = body.get("id")
+    if not rid:
+        return {"error": "id is required"}
+    try:
+        plugin = _load_reflection()
+        ok = plugin.delete_reflection(rid)
+        return {"success": ok}
+    except Exception as e:
+        logger.error(f"delete_reflection error: {e}")
+        return {"error": str(e)}
+
+
+# ─── Learned Rules ───────────────────────────────────────────────────────────
+
+async def get_rules(**kwargs):
+    """List all learned rules (active and inactive)."""
+    query = kwargs.get("query", {})
+    scope = query.get("scope", "default")
+    try:
+        plugin = _load_reflection()
+        rules = plugin.get_all_rules(scope=scope)
+        return {"rules": rules}
+    except Exception as e:
+        logger.error(f"get_rules error: {e}")
+        return {"rules": [], "error": str(e)}
+
+
+async def create_rule(**kwargs):
+    """Create a new learned rule (manual 'hypnosis' injection)."""
+    body = kwargs.get("body", {})
+    rule = body.get("rule", "").strip()
+    if not rule:
+        return {"error": "Rule text is required"}
+    scope = body.get("scope", "default")
+    try:
+        plugin = _load_reflection()
+        rid = plugin.save_learned_rule(rule=rule, source="manual", vfm_score=1.0, scope=scope)
+        return {"success": True, "id": rid}
+    except Exception as e:
+        logger.error(f"create_rule error: {e}")
+        return {"error": str(e)}
+
+
+async def update_rule(**kwargs):
+    """Update a rule's text or score."""
+    body = kwargs.get("body", {})
+    rid = body.get("id")
+    if not rid:
+        return {"error": "id is required"}
+    try:
+        plugin = _load_reflection()
+        fields = {}
+        if "rule" in body:
+            fields["rule"] = body["rule"]
+        if "vfm_score" in body:
+            fields["vfm_score"] = float(body["vfm_score"])
+        ok = plugin.update_rule(rid, **fields)
+        return {"success": ok}
+    except Exception as e:
+        logger.error(f"update_rule error: {e}")
+        return {"error": str(e)}
+
+
+async def toggle_rule(**kwargs):
+    """Toggle a rule active/inactive."""
+    body = kwargs.get("body", {})
+    rid = body.get("id")
+    active = body.get("active", True)
+    if not rid:
+        return {"error": "id is required"}
+    try:
+        plugin = _load_reflection()
+        ok = plugin.toggle_rule(rid, active)
+        return {"success": ok}
+    except Exception as e:
+        logger.error(f"toggle_rule error: {e}")
+        return {"error": str(e)}
+
+
+async def delete_rule(**kwargs):
+    """Delete a learned rule."""
+    body = kwargs.get("body", {})
+    rid = body.get("id")
+    if not rid:
+        return {"error": "id is required"}
+    try:
+        plugin = _load_reflection()
+        ok = plugin.delete_rule(rid)
+        return {"success": ok}
+    except Exception as e:
+        logger.error(f"delete_rule error: {e}")
+        return {"error": str(e)}
+
+
+# ─── Bulletin Board ──────────────────────────────────────────────────────────
+
+async def get_bulletins(**kwargs):
+    """List bulletin board entries."""
+    query = kwargs.get("query", {})
+    scope = query.get("scope", "default")
+    status = query.get("status", None)
+    try:
+        plugin = _load_reflection()
+        bulletins = plugin.get_bulletins(scope=scope, status=status)
+        return {"bulletins": bulletins}
+    except Exception as e:
+        logger.error(f"get_bulletins error: {e}")
+        return {"bulletins": [], "error": str(e)}
+
+
+async def create_bulletin(**kwargs):
+    """Create a bulletin board request (usually from AI tools)."""
+    body = kwargs.get("body", {})
+    request_type = body.get("request_type", "")
+    title = body.get("title", "").strip()
+    if not request_type or not title:
+        return {"error": "request_type and title are required"}
+    scope = body.get("scope", "default")
+    try:
+        plugin = _load_reflection()
+        bid = plugin.save_bulletin(
+            request_type=request_type,
+            title=title,
+            description=body.get("description", ""),
+            reason=body.get("reason", ""),
+            scope=scope
+        )
+        return {"success": True, "id": bid}
+    except Exception as e:
+        logger.error(f"create_bulletin error: {e}")
+        return {"error": str(e)}
+
+
+async def update_bulletin(**kwargs):
+    """Approve or deny a bulletin board request."""
+    body = kwargs.get("body", {})
+    bid = body.get("id")
+    status = body.get("status")
+    if not bid or not status:
+        return {"error": "id and status are required"}
+    try:
+        plugin = _load_reflection()
+
+        # If approving a rule_promotion, create the learned rule
+        if status == "approved":
+            bulletins = plugin.get_bulletins(scope="default", limit=200)
+            bulletin = next((b for b in bulletins if b["id"] == int(bid)), None)
+            if bulletin and bulletin["request_type"] == "rule_promotion":
+                desc = bulletin.get("description", "")
+                rule_text = desc.replace("Proposed rule: ", "", 1) if desc.startswith("Proposed rule: ") else desc
+                if rule_text:
+                    plugin.save_learned_rule(
+                        rule=rule_text,
+                        source="auto",
+                        vfm_score=0.7,
+                        scope=bulletin.get("scope", "default")
+                    )
+
+        ok = plugin.update_bulletin_status(bid, status)
+        return {"success": ok}
+    except Exception as e:
+        logger.error(f"update_bulletin error: {e}")
+        return {"error": str(e)}
+
+
+async def delete_bulletin(**kwargs):
+    """Delete a bulletin board entry."""
+    body = kwargs.get("body", {})
+    bid = body.get("id")
+    if not bid:
+        return {"error": "id is required"}
+    try:
+        plugin = _load_reflection()
+        ok = plugin.delete_bulletin(bid)
+        return {"success": ok}
+    except Exception as e:
+        logger.error(f"delete_bulletin error: {e}")
+        return {"error": str(e)}
+
+
+# ─── Capsules ────────────────────────────────────────────────────────────────
+
+async def get_capsules(**kwargs):
+    """List reasoning capsules."""
+    query = kwargs.get("query", {})
+    scope = query.get("scope", "default")
+    try:
+        plugin = _load_reflection()
+        capsules = plugin.get_capsules(scope=scope)
+        return {"capsules": capsules}
+    except Exception as e:
+        logger.error(f"get_capsules error: {e}")
+        return {"capsules": [], "error": str(e)}
+
+
+async def delete_capsule(**kwargs):
+    """Delete a capsule."""
+    body = kwargs.get("body", {})
+    cid = body.get("id")
+    if not cid:
+        return {"error": "id is required"}
+    try:
+        plugin = _load_reflection()
+        ok = plugin.delete_capsule(cid)
+        return {"success": ok}
+    except Exception as e:
+        logger.error(f"delete_capsule error: {e}")
+        return {"error": str(e)}
+
+
+# ─── Reflection Stats ────────────────────────────────────────────────────────
+
+async def get_reflection_stats(**kwargs):
+    """Get counts for all self-reflection data."""
+    query = kwargs.get("query", {})
+    scope = query.get("scope", "default")
+    try:
+        plugin = _load_reflection()
+        stats = plugin.get_reflection_stats(scope=scope)
+        return stats
+    except Exception as e:
+        logger.error(f"get_reflection_stats error: {e}")
+        return {"corrections": 0, "reflections": 0, "rules_active": 0, "rules_total": 0, "bulletins_pending": 0, "capsules": 0}

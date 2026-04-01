@@ -1,13 +1,85 @@
 {
     "name": "mission-control",
-    "version": "1.0.0",
-    "description": "Visual Mission Control dashboard — monitor agents, manage goals as a Kanban board, and track activity in real-time.",
+    "version": "1.1.0",
+    "description": "Visual Mission Control dashboard \u2014 monitor agents, manage goals, self-reflection engine with learned rules, bulletin board, and capsules.",
     "author": "Wolfreaper85",
     "icon": "\ud83c\udfaf",
     "priority": 40,
     "capabilities": {
         "tools": ["tools/mission.py"],
         "web": true,
+        "hooks": {
+            "pre_chat": "hooks/pre_chat.py",
+            "post_chat": "hooks/post_chat.py",
+            "prompt_inject": "hooks/prompt_inject.py"
+        },
+        "schedule": [
+            {
+                "name": "MC Daily Pattern Scan",
+                "cron": "0 3 * * *",
+                "handler": "schedule/pattern_scan.py",
+                "description": "Daily scan for correction patterns, VFM scoring, and bulletin board rule proposals",
+                "enabled": true
+            }
+        ],
+        "settings": [
+            {
+                "key": "correction_detection",
+                "type": "boolean",
+                "label": "Correction Detection",
+                "default": true,
+                "help": "Auto-detect when users correct the AI and log for pattern analysis"
+            },
+            {
+                "key": "self_reflection",
+                "type": "boolean",
+                "label": "Self-Reflection",
+                "default": true,
+                "help": "Perform lightweight self-evaluation after complex tasks or corrections"
+            },
+            {
+                "key": "learned_rules",
+                "type": "boolean",
+                "label": "Learned Rules",
+                "default": true,
+                "help": "Maintain and apply rules learned from corrections and manual injection"
+            },
+            {
+                "key": "bulletin_board",
+                "type": "boolean",
+                "label": "Bulletin Board",
+                "default": true,
+                "help": "AI request board for standing orders, rule promotions, schedules, and capabilities"
+            },
+            {
+                "key": "capsules",
+                "type": "boolean",
+                "label": "Reasoning Capsules",
+                "default": true,
+                "help": "Capture and reuse successful reasoning patterns from past tasks"
+            },
+            {
+                "key": "write_ahead_logging",
+                "type": "boolean",
+                "label": "Write-Ahead Logging",
+                "default": true,
+                "help": "Save corrections immediately before AI responds (prevents data loss)"
+            },
+            {
+                "key": "prompt_injection",
+                "type": "boolean",
+                "label": "Prompt Injection",
+                "default": true,
+                "help": "Inject active learned rules and capsules into the system prompt"
+            },
+            {
+                "key": "daily_pattern_scan",
+                "type": "boolean",
+                "label": "Daily Pattern Scan",
+                "default": true,
+                "help": "Run daily analysis to detect recurring correction patterns and propose rule promotions"
+            }
+        ],
         "routes": [
             {
                 "method": "GET",
@@ -83,6 +155,86 @@
                 "method": "GET",
                 "path": "notes/search",
                 "handler": "routes/dashboard.py:search_notes"
+            },
+            {
+                "method": "GET",
+                "path": "corrections",
+                "handler": "routes/dashboard.py:get_corrections"
+            },
+            {
+                "method": "POST",
+                "path": "corrections/delete",
+                "handler": "routes/dashboard.py:delete_correction"
+            },
+            {
+                "method": "GET",
+                "path": "reflections",
+                "handler": "routes/dashboard.py:get_reflections"
+            },
+            {
+                "method": "POST",
+                "path": "reflections/delete",
+                "handler": "routes/dashboard.py:delete_reflection"
+            },
+            {
+                "method": "GET",
+                "path": "rules",
+                "handler": "routes/dashboard.py:get_rules"
+            },
+            {
+                "method": "POST",
+                "path": "rules/create",
+                "handler": "routes/dashboard.py:create_rule"
+            },
+            {
+                "method": "POST",
+                "path": "rules/update",
+                "handler": "routes/dashboard.py:update_rule"
+            },
+            {
+                "method": "POST",
+                "path": "rules/toggle",
+                "handler": "routes/dashboard.py:toggle_rule"
+            },
+            {
+                "method": "POST",
+                "path": "rules/delete",
+                "handler": "routes/dashboard.py:delete_rule"
+            },
+            {
+                "method": "GET",
+                "path": "bulletins",
+                "handler": "routes/dashboard.py:get_bulletins"
+            },
+            {
+                "method": "POST",
+                "path": "bulletins/create",
+                "handler": "routes/dashboard.py:create_bulletin"
+            },
+            {
+                "method": "POST",
+                "path": "bulletins/update",
+                "handler": "routes/dashboard.py:update_bulletin"
+            },
+            {
+                "method": "POST",
+                "path": "bulletins/delete",
+                "handler": "routes/dashboard.py:delete_bulletin"
+            },
+            {
+                "method": "GET",
+                "path": "capsules",
+                "handler": "routes/dashboard.py:get_capsules"
+            },
+            {
+                "method": "POST",
+                "path": "capsules/delete",
+                "handler": "routes/dashboard.py:delete_capsule"
+            },
+            {
+                "method": "GET",
+                "path": "reflection/stats",
+                "handler": "routes/dashboard.py:get_reflection_stats"
             }
         ]
     }

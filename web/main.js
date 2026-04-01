@@ -88,6 +88,14 @@ let _lastAbandoned = 0;
 let _goalSchedules = {}; // goalId -> taskId mapping
 let _loadAgentsTimer = null;
 
+// Self-Reflection state
+let _correctionsCache = [];
+let _reflectionsCache = [];
+let _rulesCache = [];
+let _bulletinsCache = [];
+let _capsulesCache = [];
+let _reflectionStatsCache = {};
+
 // Launcher state
 let _launcherCards = []; // discovered plugins
 let _launcherOrder = []; // saved card order
@@ -829,6 +837,61 @@ function _buildLayout() {
                 </div>
             </div>
 
+            <!-- Self-Reflection: Bulletin Board -->
+            <div class="mc-reflect-section" id="mc-bulletin-section">
+                <div class="mc-board-header">
+                    <h2 class="mc-section-title">\u{1F4EC} Bulletin Board</h2>
+                    <span class="mc-badge" id="mc-bulletin-badge" style="display:none">0</span>
+                </div>
+                <div class="mc-bulletin-list" id="mc-bulletin-list">
+                    <div class="mc-empty-sm">No requests yet \u2014 the AI will post here when it wants to propose changes</div>
+                </div>
+            </div>
+
+            <!-- Self-Reflection: Learned Rules -->
+            <div class="mc-reflect-section" id="mc-rules-section">
+                <div class="mc-board-header">
+                    <h2 class="mc-section-title">\u{1F9E0} Learned Rules</h2>
+                    <button class="mc-btn mc-btn-sm" id="mc-rule-new">\u{2795} Inject Rule</button>
+                </div>
+                <div class="mc-rules-list" id="mc-rules-list">
+                    <div class="mc-empty-sm">No rules yet \u2014 add one manually or approve a bulletin board promotion</div>
+                </div>
+            </div>
+
+            <!-- Self-Reflection: Corrections Log -->
+            <div class="mc-reflect-section" id="mc-corrections-section">
+                <div class="mc-board-header">
+                    <h2 class="mc-section-title">\u{1F6D1} Corrections</h2>
+                    <span class="mc-reflect-count" id="mc-corrections-count">0</span>
+                </div>
+                <div class="mc-corrections-list" id="mc-corrections-list">
+                    <div class="mc-empty-sm">No corrections detected yet</div>
+                </div>
+            </div>
+
+            <!-- Self-Reflection: Reflections -->
+            <div class="mc-reflect-section" id="mc-reflections-section">
+                <div class="mc-board-header">
+                    <h2 class="mc-section-title">\u{1F4AD} Reflections</h2>
+                    <span class="mc-reflect-count" id="mc-reflections-count">0</span>
+                </div>
+                <div class="mc-reflections-list" id="mc-reflections-list">
+                    <div class="mc-empty-sm">No reflections yet \u2014 the AI will self-evaluate after complex tasks</div>
+                </div>
+            </div>
+
+            <!-- Self-Reflection: Capsules -->
+            <div class="mc-reflect-section" id="mc-capsules-section">
+                <div class="mc-board-header">
+                    <h2 class="mc-section-title">\u{1F48A} Capsules</h2>
+                    <span class="mc-reflect-count" id="mc-capsules-count">0</span>
+                </div>
+                <div class="mc-capsules-grid" id="mc-capsules-grid">
+                    <div class="mc-empty-sm">No reasoning capsules captured yet</div>
+                </div>
+            </div>
+
             <!-- Schedule Calendar -->
             <div class="mc-calendar-section" id="mc-calendar-section">
                 <div class="mc-board-header">
@@ -996,6 +1059,25 @@ function _buildLayout() {
             <div class="mc-modal-footer">
                 <button class="mc-btn" id="mc-note-cancel">Cancel</button>
                 <button class="mc-btn mc-btn-accent" id="mc-note-save">\u{1F4BE} Save Note</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Inject Rule Modal (Hypnosis) -->
+    <div class="mc-modal-overlay" id="mc-rule-modal" style="display:none">
+        <div class="mc-modal">
+            <div class="mc-modal-header">
+                <h3>\u{1F9E0} Inject Learned Rule</h3>
+                <button class="mc-modal-close" id="mc-rule-modal-close">\u{2715}</button>
+            </div>
+            <div class="mc-modal-body">
+                <p class="mc-modal-hint">This rule will be injected into the AI's system prompt. Think of it as planting a suggestion \u2014 the AI will follow it as if it always knew.</p>
+                <label class="mc-label">Rule</label>
+                <textarea class="mc-input mc-textarea" id="mc-rule-text" placeholder="e.g. When discussing code, always suggest error handling for network calls..." rows="4" maxlength="2000"></textarea>
+            </div>
+            <div class="mc-modal-footer">
+                <button class="mc-btn" id="mc-rule-cancel">Cancel</button>
+                <button class="mc-btn mc-btn-accent" id="mc-rule-save">\u{1F9E0} Inject Rule</button>
             </div>
         </div>
     </div>
@@ -1798,6 +1880,10 @@ function _loadAll() {
         if (!window._mcNotesInit) { window._mcNotesInit = true; _initNotes(); }
         else { _loadNotes(); }
     } catch(e) { console.error('[MC] Notes error:', e); }
+    try {
+        if (!window._mcReflectionInit) { window._mcReflectionInit = true; _initReflection(); }
+        else { _loadReflectionData(); }
+    } catch(e) { console.error('[MC] Reflection error:', e); }
 }
 
 async function _checkScheduleStamps() {
@@ -2561,6 +2647,322 @@ function _initNotes() {
                 });
                 _loadNotes();
             } catch (e) { console.error('[MC] Notes clear error:', e); }
+        });
+    }
+}
+
+// ─── Self-Reflection ────────────────────────────────────────────────────────
+
+function _loadReflectionData() {
+    const base = '/api/plugin/mission-control';
+    const h = { 'X-CSRF-Token': CSRF() };
+
+    fetch(`${base}/corrections`, { headers: h }).then(r => r.json())
+        .then(d => { _correctionsCache = d.corrections || []; _renderCorrections(); })
+        .catch(e => console.error('[MC] Corrections load:', e));
+
+    fetch(`${base}/reflections`, { headers: h }).then(r => r.json())
+        .then(d => { _reflectionsCache = d.reflections || []; _renderReflections(); })
+        .catch(e => console.error('[MC] Reflections load:', e));
+
+    fetch(`${base}/rules`, { headers: h }).then(r => r.json())
+        .then(d => { _rulesCache = d.rules || []; _renderRules(); })
+        .catch(e => console.error('[MC] Rules load:', e));
+
+    fetch(`${base}/bulletins`, { headers: h }).then(r => r.json())
+        .then(d => { _bulletinsCache = d.bulletins || []; _renderBulletins(); })
+        .catch(e => console.error('[MC] Bulletins load:', e));
+
+    fetch(`${base}/capsules`, { headers: h }).then(r => r.json())
+        .then(d => { _capsulesCache = d.capsules || []; _renderCapsules(); })
+        .catch(e => console.error('[MC] Capsules load:', e));
+}
+
+function _fmtDate(ts) {
+    if (!ts) return '';
+    const d = new Date(ts + (ts.includes('Z') ? '' : 'Z'));
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+           d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
+// ── Bulletin Board ──
+
+function _renderBulletins() {
+    const el = document.getElementById('mc-bulletin-list');
+    if (!el) return;
+    const badge = document.getElementById('mc-bulletin-badge');
+    const pending = _bulletinsCache.filter(b => b.status === 'pending');
+    if (badge) {
+        badge.textContent = pending.length;
+        badge.style.display = pending.length > 0 ? 'inline-block' : 'none';
+    }
+    if (_bulletinsCache.length === 0) {
+        el.innerHTML = '<div class="mc-empty-sm">No requests yet \u2014 the AI will post here when it wants to propose changes</div>';
+        return;
+    }
+    const statusIcon = { pending: '\u23F3', approved: '\u2705', denied: '\u274C' };
+    const typeIcon = { standing_order: '\u{1F4E5}', rule_promotion: '\u2B06\uFE0F', schedule: '\u23F0', capability: '\u{1F527}' };
+    const statusColor = { pending: '#ffc107', approved: '#4caf50', denied: '#666' };
+
+    el.innerHTML = _bulletinsCache.map(b => `
+        <div class="mc-bulletin-card mc-bulletin-${b.status}" data-id="${b.id}">
+            <div class="mc-bulletin-top">
+                <span class="mc-bulletin-type">${typeIcon[b.request_type] || '\u{1F4CB}'} ${b.request_type.replace(/_/g, ' ')}</span>
+                <span class="mc-bulletin-status" style="color:${statusColor[b.status] || '#888'}">${statusIcon[b.status] || ''} ${b.status}</span>
+            </div>
+            <div class="mc-bulletin-title">${_escHtml(b.title)}</div>
+            ${b.description ? `<div class="mc-bulletin-desc">${_escHtml(b.description).substring(0, 300)}</div>` : ''}
+            ${b.reason ? `<div class="mc-bulletin-reason">\u{1F4A1} ${_escHtml(b.reason).substring(0, 200)}</div>` : ''}
+            <div class="mc-bulletin-footer">
+                <span class="mc-bulletin-date">${_fmtDate(b.created_at)}</span>
+                ${b.status === 'pending' ? `
+                    <div class="mc-bulletin-actions">
+                        <button class="mc-btn mc-btn-sm mc-btn-approve" data-id="${b.id}" title="Approve">\u2705 Approve</button>
+                        <button class="mc-btn mc-btn-sm mc-btn-deny" data-id="${b.id}" title="Deny">\u274C Deny</button>
+                    </div>
+                ` : ''}
+                <button class="mc-card-btn mc-bulletin-del" data-id="${b.id}" title="Delete">\u{1F5D1}\uFE0F</button>
+            </div>
+        </div>
+    `).join('');
+
+    el.querySelectorAll('.mc-btn-approve').forEach(btn => {
+        btn.addEventListener('click', () => _updateBulletinStatus(btn.dataset.id, 'approved'));
+    });
+    el.querySelectorAll('.mc-btn-deny').forEach(btn => {
+        btn.addEventListener('click', () => _updateBulletinStatus(btn.dataset.id, 'denied'));
+    });
+    el.querySelectorAll('.mc-bulletin-del').forEach(btn => {
+        btn.addEventListener('click', () => _deleteBulletin(btn.dataset.id));
+    });
+}
+
+async function _updateBulletinStatus(id, status) {
+    try {
+        await fetch('/api/plugin/mission-control/bulletins/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+            body: JSON.stringify({ id: parseInt(id), status })
+        });
+        _loadReflectionData();
+    } catch (e) { console.error('[MC] Bulletin update error:', e); }
+}
+
+async function _deleteBulletin(id) {
+    if (!confirm('Delete this request?')) return;
+    try {
+        await fetch('/api/plugin/mission-control/bulletins/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+            body: JSON.stringify({ id: parseInt(id) })
+        });
+        _loadReflectionData();
+    } catch (e) { console.error('[MC] Bulletin delete error:', e); }
+}
+
+// ── Learned Rules ──
+
+function _renderRules() {
+    const el = document.getElementById('mc-rules-list');
+    if (!el) return;
+    if (_rulesCache.length === 0) {
+        el.innerHTML = '<div class="mc-empty-sm">No rules yet \u2014 add one manually or approve a bulletin board promotion</div>';
+        return;
+    }
+    el.innerHTML = _rulesCache.map(r => {
+        const sourceIcon = r.source === 'manual' ? '\u{1F9E0}' : '\u{1F916}';
+        const activeClass = r.active ? 'mc-rule-active' : 'mc-rule-inactive';
+        const vfmColor = r.vfm_score >= 0.8 ? '#4caf50' : r.vfm_score >= 0.5 ? '#ffc107' : '#666';
+        return `<div class="mc-rule-card ${activeClass}" data-id="${r.id}">
+            <div class="mc-rule-top">
+                <label class="mc-rule-toggle"><input type="checkbox" ${r.active ? 'checked' : ''} data-id="${r.id}" class="mc-rule-check"> <span class="mc-rule-toggle-label">${r.active ? 'Active' : 'Inactive'}</span></label>
+                <span class="mc-rule-source">${sourceIcon} ${r.source}</span>
+                <span class="mc-rule-vfm" style="color:${vfmColor}">VFM: ${r.vfm_score.toFixed(2)}</span>
+                <span class="mc-rule-seen">Seen ${r.times_seen}x</span>
+                <button class="mc-card-btn mc-rule-del" data-id="${r.id}" title="Delete">\u{1F5D1}\uFE0F</button>
+            </div>
+            <div class="mc-rule-text">${_escHtml(r.rule)}</div>
+            <div class="mc-rule-dates">${_fmtDate(r.first_seen)} \u2192 ${_fmtDate(r.last_seen)}</div>
+        </div>`;
+    }).join('');
+
+    el.querySelectorAll('.mc-rule-check').forEach(cb => {
+        cb.addEventListener('change', async () => {
+            try {
+                await fetch('/api/plugin/mission-control/rules/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                    body: JSON.stringify({ id: parseInt(cb.dataset.id), active: cb.checked })
+                });
+                _loadReflectionData();
+            } catch (e) { console.error('[MC] Rule toggle error:', e); }
+        });
+    });
+
+    el.querySelectorAll('.mc-rule-del').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (!confirm('Delete this rule?')) return;
+            try {
+                await fetch('/api/plugin/mission-control/rules/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                    body: JSON.stringify({ id: parseInt(btn.dataset.id) })
+                });
+                _loadReflectionData();
+            } catch (e) { console.error('[MC] Rule delete error:', e); }
+        });
+    });
+}
+
+// ── Corrections ──
+
+function _renderCorrections() {
+    const el = document.getElementById('mc-corrections-list');
+    const countEl = document.getElementById('mc-corrections-count');
+    if (!el) return;
+    if (countEl) countEl.textContent = _correctionsCache.length;
+    if (_correctionsCache.length === 0) {
+        el.innerHTML = '<div class="mc-empty-sm">No corrections detected yet</div>';
+        return;
+    }
+    el.innerHTML = _correctionsCache.slice(0, 30).map(c => {
+        const catLabel = (c.category || 'unknown').replace(/_/g, ' ');
+        return `<div class="mc-correction-card" data-id="${c.id}">
+            <div class="mc-correction-top">
+                <span class="mc-correction-cat">${catLabel}</span>
+                <span class="mc-correction-date">${_fmtDate(c.created_at)}</span>
+                <button class="mc-card-btn mc-correction-del" data-id="${c.id}" title="Delete">\u{1F5D1}\uFE0F</button>
+            </div>
+            <div class="mc-correction-text">${_escHtml(c.user_message).substring(0, 300)}</div>
+        </div>`;
+    }).join('');
+
+    el.querySelectorAll('.mc-correction-del').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (!confirm('Delete this correction?')) return;
+            try {
+                await fetch('/api/plugin/mission-control/corrections/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                    body: JSON.stringify({ id: parseInt(btn.dataset.id) })
+                });
+                _loadReflectionData();
+            } catch (e) { console.error('[MC] Correction delete error:', e); }
+        });
+    });
+}
+
+// ── Reflections ──
+
+function _renderReflections() {
+    const el = document.getElementById('mc-reflections-list');
+    const countEl = document.getElementById('mc-reflections-count');
+    if (!el) return;
+    if (countEl) countEl.textContent = _reflectionsCache.length;
+    if (_reflectionsCache.length === 0) {
+        el.innerHTML = '<div class="mc-empty-sm">No reflections yet \u2014 the AI will self-evaluate after complex tasks</div>';
+        return;
+    }
+    el.innerHTML = _reflectionsCache.slice(0, 20).map(r => `
+        <div class="mc-reflection-card" data-id="${r.id}">
+            <div class="mc-reflection-top">
+                <span class="mc-reflection-context">${_escHtml((r.task_context || '').substring(0, 100))}</span>
+                <span class="mc-reflection-date">${_fmtDate(r.created_at)}</span>
+                <button class="mc-card-btn mc-reflection-del" data-id="${r.id}" title="Delete">\u{1F5D1}\uFE0F</button>
+            </div>
+            ${r.what_worked ? `<div class="mc-reflection-good">\u2705 ${_escHtml(r.what_worked)}</div>` : ''}
+            ${r.what_didnt ? `<div class="mc-reflection-bad">\u26A0\uFE0F ${_escHtml(r.what_didnt)}</div>` : ''}
+            <div class="mc-reflection-lesson">\u{1F4A1} ${_escHtml(r.lesson)}</div>
+        </div>
+    `).join('');
+
+    el.querySelectorAll('.mc-reflection-del').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (!confirm('Delete this reflection?')) return;
+            try {
+                await fetch('/api/plugin/mission-control/reflections/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                    body: JSON.stringify({ id: parseInt(btn.dataset.id) })
+                });
+                _loadReflectionData();
+            } catch (e) { console.error('[MC] Reflection delete error:', e); }
+        });
+    });
+}
+
+// ── Capsules ──
+
+function _renderCapsules() {
+    const el = document.getElementById('mc-capsules-grid');
+    const countEl = document.getElementById('mc-capsules-count');
+    if (!el) return;
+    if (countEl) countEl.textContent = _capsulesCache.length;
+    if (_capsulesCache.length === 0) {
+        el.innerHTML = '<div class="mc-empty-sm">No reasoning capsules captured yet</div>';
+        return;
+    }
+    el.innerHTML = _capsulesCache.slice(0, 20).map(c => `
+        <div class="mc-capsule-card" data-id="${c.id}">
+            <div class="mc-capsule-top">
+                <span class="mc-capsule-type">${_escHtml(c.problem_type)}</span>
+                <span class="mc-capsule-uses">\u{1F504} ${c.success_count}x</span>
+                <button class="mc-card-btn mc-capsule-del" data-id="${c.id}" title="Delete">\u{1F5D1}\uFE0F</button>
+            </div>
+            <div class="mc-capsule-pattern">${_escHtml(c.reasoning_pattern).substring(0, 200)}</div>
+            <div class="mc-capsule-date">${_fmtDate(c.last_used || c.created_at)}</div>
+        </div>
+    `).join('');
+
+    el.querySelectorAll('.mc-capsule-del').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (!confirm('Delete this capsule?')) return;
+            try {
+                await fetch('/api/plugin/mission-control/capsules/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                    body: JSON.stringify({ id: parseInt(btn.dataset.id) })
+                });
+                _loadReflectionData();
+            } catch (e) { console.error('[MC] Capsule delete error:', e); }
+        });
+    });
+}
+
+// ── Init & Rule Injection Modal ──
+
+function _initReflection() {
+    _loadReflectionData();
+
+    // Rule injection modal
+    const newRuleBtn = document.getElementById('mc-rule-new');
+    if (newRuleBtn) {
+        newRuleBtn.addEventListener('click', () => {
+            document.getElementById('mc-rule-text').value = '';
+            document.getElementById('mc-rule-modal').style.display = 'flex';
+        });
+    }
+
+    const closeRule = () => { document.getElementById('mc-rule-modal').style.display = 'none'; };
+    const ruleClose = document.getElementById('mc-rule-modal-close');
+    const ruleCancel = document.getElementById('mc-rule-cancel');
+    if (ruleClose) ruleClose.addEventListener('click', closeRule);
+    if (ruleCancel) ruleCancel.addEventListener('click', closeRule);
+
+    const ruleSave = document.getElementById('mc-rule-save');
+    if (ruleSave) {
+        ruleSave.addEventListener('click', async () => {
+            const rule = document.getElementById('mc-rule-text').value.trim();
+            if (!rule) { alert('Rule text is required.'); return; }
+            try {
+                await fetch('/api/plugin/mission-control/rules/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                    body: JSON.stringify({ rule })
+                });
+                closeRule();
+                _loadReflectionData();
+            } catch (e) { console.error('[MC] Rule save error:', e); }
         });
     }
 }
@@ -5765,6 +6167,79 @@ select.mc-input { cursor: pointer; }
 @keyframes mc-particle-burst {
     0% { left: 50%; opacity: 0; transform: scale(0.5); } 30% { opacity: 1; transform: scale(1.5); } 100% { opacity: 0; transform: scale(0.5); }
 }
+
+/* ─── Self-Reflection Panels ─── */
+.mc-reflect-section { background: #111118; border: 1px solid #1a1a24; border-radius: 10px; padding: 16px 20px; margin-top: 16px; }
+.mc-reflect-count { font-size: 0.72rem; color: #666; background: #1a1a24; padding: 2px 8px; border-radius: 10px; }
+.mc-badge { font-size: 0.65rem; font-weight: 700; color: #0a0a0f; background: #ffc107; padding: 2px 7px; border-radius: 10px; margin-left: 8px; }
+
+/* Bulletin Board */
+.mc-bulletin-list { display: flex; flex-direction: column; gap: 10px; }
+.mc-bulletin-card { background: #0d0d14; border: 1px solid #1a1a24; border-radius: 8px; padding: 12px 14px; transition: border-color 0.2s; }
+.mc-bulletin-card:hover { border-color: #2a2a3a; }
+.mc-bulletin-pending { border-left: 3px solid #ffc107; }
+.mc-bulletin-approved { border-left: 3px solid #4caf50; opacity: 0.7; }
+.mc-bulletin-denied { border-left: 3px solid #666; opacity: 0.5; }
+.mc-bulletin-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.mc-bulletin-type { font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.05em; }
+.mc-bulletin-status { font-size: 0.72rem; font-weight: 700; }
+.mc-bulletin-title { font-weight: 600; color: #e0e0e0; font-size: 0.88rem; margin-bottom: 4px; }
+.mc-bulletin-desc { font-size: 0.8rem; color: #999; line-height: 1.4; margin-bottom: 4px; }
+.mc-bulletin-reason { font-size: 0.75rem; color: #888; font-style: italic; margin-bottom: 6px; }
+.mc-bulletin-footer { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.mc-bulletin-date { font-size: 0.68rem; color: #555; }
+.mc-bulletin-actions { display: flex; gap: 6px; margin-left: auto; }
+.mc-btn-approve { background: #1b5e20 !important; border-color: #2e7d32 !important; color: #fff !important; }
+.mc-btn-approve:hover { background: #2e7d32 !important; }
+.mc-btn-deny { background: #333 !important; border-color: #555 !important; color: #ccc !important; }
+.mc-btn-deny:hover { background: #444 !important; }
+
+/* Learned Rules */
+.mc-rules-list { display: flex; flex-direction: column; gap: 8px; }
+.mc-rule-card { background: #0d0d14; border: 1px solid #1a1a24; border-radius: 8px; padding: 10px 14px; transition: border-color 0.2s; }
+.mc-rule-card:hover { border-color: #2a2a3a; }
+.mc-rule-active { border-left: 3px solid #4caf50; }
+.mc-rule-inactive { border-left: 3px solid #444; opacity: 0.6; }
+.mc-rule-top { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+.mc-rule-toggle { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.mc-rule-toggle input { cursor: pointer; }
+.mc-rule-toggle-label { font-size: 0.72rem; color: #888; }
+.mc-rule-source { font-size: 0.7rem; color: #666; }
+.mc-rule-vfm { font-size: 0.7rem; font-weight: 700; }
+.mc-rule-seen { font-size: 0.68rem; color: #555; }
+.mc-rule-text { color: #ccc; font-size: 0.85rem; line-height: 1.4; margin-bottom: 4px; }
+.mc-rule-dates { font-size: 0.65rem; color: #444; }
+
+/* Corrections */
+.mc-corrections-list { display: flex; flex-direction: column; gap: 6px; max-height: 400px; overflow-y: auto; }
+.mc-correction-card { background: #0d0d14; border: 1px solid #1a1a24; border-radius: 8px; padding: 10px 14px; }
+.mc-correction-top { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.mc-correction-cat { font-size: 0.7rem; color: #ff9800; background: rgba(255,152,0,0.1); padding: 1px 6px; border-radius: 4px; text-transform: uppercase; }
+.mc-correction-date { font-size: 0.68rem; color: #555; margin-left: auto; }
+.mc-correction-text { font-size: 0.82rem; color: #999; line-height: 1.4; }
+
+/* Reflections */
+.mc-reflections-list { display: flex; flex-direction: column; gap: 10px; max-height: 500px; overflow-y: auto; }
+.mc-reflection-card { background: #0d0d14; border: 1px solid #1a1a24; border-radius: 8px; padding: 12px 14px; }
+.mc-reflection-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.mc-reflection-context { font-size: 0.8rem; color: #ccc; font-weight: 600; flex: 1; }
+.mc-reflection-date { font-size: 0.68rem; color: #555; margin: 0 8px; }
+.mc-reflection-good { font-size: 0.8rem; color: #81c784; line-height: 1.4; margin-bottom: 3px; }
+.mc-reflection-bad { font-size: 0.8rem; color: #ffb74d; line-height: 1.4; margin-bottom: 3px; }
+.mc-reflection-lesson { font-size: 0.82rem; color: #4fc3f7; line-height: 1.4; font-weight: 600; margin-top: 4px; }
+
+/* Capsules */
+.mc-capsules-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.mc-capsule-card { background: #0d0d14; border: 1px solid #1a1a24; border-radius: 8px; padding: 10px 14px; }
+.mc-capsule-card:hover { border-color: #2a2a3a; }
+.mc-capsule-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.mc-capsule-type { font-size: 0.72rem; color: #ce93d8; background: rgba(206,147,216,0.1); padding: 1px 6px; border-radius: 4px; text-transform: uppercase; font-weight: 600; }
+.mc-capsule-uses { font-size: 0.7rem; color: #666; margin-left: auto; }
+.mc-capsule-pattern { font-size: 0.8rem; color: #999; line-height: 1.4; max-height: 80px; overflow-y: auto; }
+.mc-capsule-date { font-size: 0.65rem; color: #444; margin-top: 4px; }
+
+/* Rule injection modal hint */
+.mc-modal-hint { font-size: 0.8rem; color: #888; line-height: 1.5; margin-bottom: 12px; padding: 8px 12px; background: rgba(79,195,247,0.05); border: 1px solid rgba(79,195,247,0.15); border-radius: 6px; }
 
 /* Responsive */
 @media (max-width: 1100px) {
