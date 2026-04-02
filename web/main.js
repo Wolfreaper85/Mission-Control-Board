@@ -1284,8 +1284,9 @@ async function _onShowDashboard() {
     try {
         const resp = await fetch('/api/webui/plugins/mission-control/settings', { headers: { 'X-CSRF-Token': CSRF() } });
         if (resp.ok) {
-            const settings = await resp.json();
-            _workshopEnabled = settings.workshop !== false; // default true
+            const data = await resp.json();
+            const s = data.settings || {};
+            _workshopEnabled = s.workshop !== false; // default true
         }
     } catch (e) { /* default to enabled */ }
 
