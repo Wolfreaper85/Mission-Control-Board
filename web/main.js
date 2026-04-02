@@ -6211,8 +6211,8 @@ function _injectStyles() {
 .mc-sched-goal-name { font-size: 0.95rem; font-weight: 600; color: #f44336; padding: 6px 10px; background: #f4433612; border-radius: 6px; margin-bottom: 4px; }
 .mc-sched-row { margin-top: 2px; }
 .mc-sched-preview { margin-top: 8px; padding: 8px 12px; background: #0d0d14; border: 1px solid #1a1a24; border-radius: 8px; font-size: 0.8rem; color: #4fc3f7; }
-.mc-day-picker { display: flex; gap: 6px; margin: 4px 0 8px; }
-.mc-day-btn { background: #1a1a24; border: 1px solid #2a2a3a; color: #888; padding: 6px 10px; border-radius: 6px; font-size: 0.75rem; cursor: pointer; transition: all 0.2s; font-weight: 600; }
+.mc-day-picker { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.mc-day-btn { background: #1a1a24; border: 1px solid #2a2a3a; color: #888; padding: 6px 10px; border-radius: 6px; font-size: 0.75rem; cursor: pointer; transition: all 0.2s; font-weight: 600; min-width: 0; flex-shrink: 1; }
 .mc-day-btn:hover { border-color: #4fc3f7; color: #ccc; }
 .mc-day-btn.mc-day-active { background: #4fc3f7; color: #0a0a0f; border-color: #4fc3f7; }
 
@@ -6233,8 +6233,9 @@ function _injectStyles() {
 .mc-btn-sm { font-size: 0.75rem; padding: 4px 10px; }
 .mc-textarea { resize: vertical; min-height: 100px; font-family: inherit; }
 .mc-calendar-section { background: #111118; border: 1px solid #1a1a24; border-radius: 10px; padding: 16px 20px; margin-top: 16px; }
-.mc-week-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 16px; }
-.mc-cal-day { background: #0d0d14; border: 1px solid #1a1a24; border-radius: 8px; padding: 8px; min-height: 80px; }
+.mc-week-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.mc-week-grid > * { flex: 1 1 110px; max-width: calc(14.28% - 7px); }
+.mc-cal-day { background: #0d0d14; border: 1px solid #1a1a24; border-radius: 8px; padding: 8px; min-height: 80px; min-width: 0; overflow: hidden; }
 .mc-cal-today { border-color: #4fc3f7; box-shadow: 0 0 8px rgba(79,195,247,0.15); }
 .mc-cal-day-label { font-size: 0.7rem; font-weight: 700; color: #666; text-transform: uppercase; text-align: center; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #1a1a24; }
 .mc-cal-today .mc-cal-day-label { color: #4fc3f7; }
@@ -6557,7 +6558,7 @@ select.mc-input { cursor: pointer; }
     .mc-stats-row { flex-wrap: wrap; }
     .mc-stat-card { min-width: 120px; }
     .mc-greeting { font-size: 1.3rem; }
-    .mc-week-grid { grid-template-columns: repeat(4, 1fr); }
+    .mc-week-grid > * { max-width: none; }
     .mc-pixel-stage { max-height: 60vh; }
     .mc-pixel-hub { width: 50px; }
 }
