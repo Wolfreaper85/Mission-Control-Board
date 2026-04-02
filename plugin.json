@@ -82,6 +82,13 @@
                 "help": "Inject active learned rules and capsules into the system prompt"
             },
             {
+                "key": "workshop",
+                "type": "boolean",
+                "label": "Workshop",
+                "default": true,
+                "help": "Show the pixel art Workshop on the dashboard — disable to save GPU/CPU resources"
+            },
+            {
                 "key": "daily_pattern_scan",
                 "type": "boolean",
                 "label": "Daily Pattern Scan",

@@ -116,7 +116,7 @@ let _pixelAnimTimer = null;
 let _offUser = null, _offAI = null; // offscreen canvases (629×1024, matching image)
 const _GW = 320, _GH = 520;        // game resolution for procedural mode
 let _pixelStyle = localStorage.getItem('mc-pixel-style') || 'chroma';
-let _workshopEnabled = localStorage.getItem('mc-workshop-enabled') !== 'false'; // default: on
+let _workshopEnabled = true; // controlled by plugin settings, fetched on dashboard show
 
 // ─── Launcher init ───────────────────────────────────────────────────────────
 
@@ -877,16 +877,10 @@ function _buildLayout() {
             <div class="mc-pixel-section" id="mc-pixel-section">
                 <div class="mc-pixel-header">
                     <h2 class="mc-section-title">\u{1F3A8} Workshop</h2>
-                    <div class="mc-pixel-header-controls">
-                        <select class="mc-input mc-pixel-style-select" id="mc-pixel-style">
-                            <option value="chroma">Chroma Key (PNG Overlay)</option>
-                            <option value="procedural">Procedural Pixel Art</option>
-                        </select>
-                        <label class="mc-workshop-toggle" title="Toggle Workshop — saves resources when disabled">
-                            <input type="checkbox" id="mc-workshop-toggle">
-                            <span class="mc-workshop-toggle-slider"></span>
-                        </label>
-                    </div>
+                    <select class="mc-input mc-pixel-style-select" id="mc-pixel-style">
+                        <option value="chroma">Chroma Key (PNG Overlay)</option>
+                        <option value="procedural">Procedural Pixel Art</option>
+                    </select>
                 </div>
                 <div class="mc-pixel-stage">
                     <div class="mc-pixel-desk">
@@ -1200,24 +1194,6 @@ function _bindEvents(el) {
         }
     });
 
-    // Workshop toggle
-    const workshopToggle = el.querySelector('#mc-workshop-toggle');
-    if (workshopToggle) {
-        workshopToggle.checked = _workshopEnabled;
-        workshopToggle.addEventListener('change', () => {
-            _workshopEnabled = workshopToggle.checked;
-            localStorage.setItem('mc-workshop-enabled', _workshopEnabled ? 'true' : 'false');
-            const section = document.getElementById('mc-pixel-section');
-            if (_workshopEnabled) {
-                if (section) section.style.display = '';
-                _initPixelArt();
-            } else {
-                _stopPixelArt();
-                if (section) section.style.display = 'none';
-            }
-        });
-    }
-
     // Chat management
     el.querySelector('#mc-chat-switcher').addEventListener('click', () => _toggleChatDropdown());
     el.querySelector('#mc-chat-new').addEventListener('click', () => _createNewChat());
@@ -1301,13 +1277,25 @@ function _bindEvents(el) {
 
 // ─── Show/Hide lifecycle ────────────────────────────────────────────────────
 
-function _onShowDashboard() {
+async function _onShowDashboard() {
     _startDashboardPolling();
+
+    // Check workshop setting from plugin settings
+    try {
+        const resp = await fetch('/api/plugins/mission-control/settings', { headers: { 'X-CSRF-Token': CSRF() } });
+        if (resp.ok) {
+            const settings = await resp.json();
+            _workshopEnabled = settings.workshop !== false; // default true
+        }
+    } catch (e) { /* default to enabled */ }
+
+    const section = document.getElementById('mc-pixel-section');
     if (_workshopEnabled) {
+        if (section) section.style.display = '';
         _setPixelState('idle');
         _initPixelArt();
     } else {
-        const section = document.getElementById('mc-pixel-section');
+        _stopPixelArt();
         if (section) section.style.display = 'none';
     }
 }
@@ -6297,23 +6285,6 @@ select.mc-input { cursor: pointer; }
 
 /* ─── 16-Bit Pixel Art Workshop ─── */
 .mc-pixel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.mc-pixel-header-controls { display: flex; align-items: center; gap: 10px; }
-
-/* Workshop toggle switch */
-.mc-workshop-toggle {
-    position: relative; display: inline-block; width: 36px; height: 20px; cursor: pointer; flex-shrink: 0;
-}
-.mc-workshop-toggle input { opacity: 0; width: 0; height: 0; }
-.mc-workshop-toggle-slider {
-    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-    background: #2a2a3a; border-radius: 10px; transition: 0.3s;
-}
-.mc-workshop-toggle-slider::before {
-    content: ''; position: absolute; height: 14px; width: 14px; left: 3px; bottom: 3px;
-    background: #555; border-radius: 50%; transition: 0.3s;
-}
-.mc-workshop-toggle input:checked + .mc-workshop-toggle-slider { background: rgba(79,195,247,0.3); }
-.mc-workshop-toggle input:checked + .mc-workshop-toggle-slider::before { transform: translateX(16px); background: #4fc3f7; }
 .mc-pixel-style-select { width: auto; max-width: 220px; font-size: 0.78rem; padding: 4px 8px; }
 .mc-pixel-section { background: #111118; border: 1px solid #1a1a24; border-radius: 10px; padding: 12px; margin-top: 16px; overflow: hidden; }
 .mc-pixel-stage { display: flex; align-items: center; justify-content: center; gap: 0; position: relative; border-radius: 8px; border: 1px solid #1a1a24; overflow: hidden; background: #080810; }
