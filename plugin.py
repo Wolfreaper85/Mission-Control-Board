@@ -61,11 +61,17 @@ def ensure_tables():
                 correction TEXT NOT NULL,
                 category TEXT,
                 scope TEXT NOT NULL DEFAULT 'default',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_accessed DATETIME
             )
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_corrections_scope ON corrections(scope)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_corrections_created ON corrections(created_at)')
+        # Migration: add last_accessed to existing tables
+        try:
+            conn.execute('ALTER TABLE corrections ADD COLUMN last_accessed DATETIME')
+        except Exception:
+            pass  # Column already exists
 
         conn.execute('''
             CREATE TABLE IF NOT EXISTS reflections (
@@ -75,10 +81,15 @@ def ensure_tables():
                 what_didnt TEXT,
                 lesson TEXT NOT NULL,
                 scope TEXT NOT NULL DEFAULT 'default',
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_accessed DATETIME
             )
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_reflections_scope ON reflections(scope)')
+        try:
+            conn.execute('ALTER TABLE reflections ADD COLUMN last_accessed DATETIME')
+        except Exception:
+            pass
 
         conn.execute('''
             CREATE TABLE IF NOT EXISTS learned_rules (
@@ -568,6 +579,124 @@ def delete_capsule(capsule_id):
     except Exception as e:
         logger.error(f"Self-Reflection: delete_capsule error: {e}")
         return False
+
+
+# ─── Keep-Alive (Touch) ────────────────────────────────────────────────────
+
+def touch_corrections(ids):
+    """Reset retention timer on corrections the system still finds useful."""
+    if not ids or not ensure_tables():
+        return
+    try:
+        conn = get_connection()
+        placeholders = ",".join("?" * len(ids))
+        conn.execute(
+            f"UPDATE corrections SET last_accessed = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
+            [int(i) for i in ids]
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Self-Reflection: touch_corrections error: {e}")
+
+
+def touch_reflections(ids):
+    """Reset retention timer on reflections the system still finds useful."""
+    if not ids or not ensure_tables():
+        return
+    try:
+        conn = get_connection()
+        placeholders = ",".join("?" * len(ids))
+        conn.execute(
+            f"UPDATE reflections SET last_accessed = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
+            [int(i) for i in ids]
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Self-Reflection: touch_reflections error: {e}")
+
+
+def touch_capsules(ids):
+    """Reset retention timer on capsules that were injected into the prompt."""
+    if not ids or not ensure_tables():
+        return
+    try:
+        conn = get_connection()
+        placeholders = ",".join("?" * len(ids))
+        conn.execute(
+            f"UPDATE capsules SET last_used = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
+            [int(i) for i in ids]
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Self-Reflection: touch_capsules error: {e}")
+
+
+# ─── Retention / Cleanup ────────────────────────────────────────────────────
+
+# How long to keep data (in days)
+RETENTION_DAYS = {
+    "corrections": 30,       # Raw corrections — 30 days, patterns are extracted by then
+    "reflections": 60,       # Reflections — 60 days
+    "capsules": 90,          # Capsules — 90 days (longer, they're curated)
+    "bulletins_resolved": 30 # Approved/denied bulletins — 30 days (pending kept forever)
+}
+
+def cleanup_old_data():
+    """Purge data older than retention limits. Called by daily pattern scan."""
+    if not ensure_tables():
+        return {}
+    try:
+        conn = get_connection()
+        deleted = {}
+
+        # Corrections — only purge if BOTH created_at AND last_accessed are past retention
+        # If last_accessed is set, the system found it useful and reset the timer
+        days_c = f"-{RETENTION_DAYS['corrections']} days"
+        cur = conn.execute(
+            "DELETE FROM corrections WHERE created_at < datetime('now', ?) AND "
+            "(last_accessed IS NULL OR last_accessed < datetime('now', ?))",
+            (days_c, days_c)
+        )
+        deleted["corrections"] = cur.rowcount
+
+        # Reflections — same keep-alive logic
+        days_r = f"-{RETENTION_DAYS['reflections']} days"
+        cur = conn.execute(
+            "DELETE FROM reflections WHERE created_at < datetime('now', ?) AND "
+            "(last_accessed IS NULL OR last_accessed < datetime('now', ?))",
+            (days_r, days_r)
+        )
+        deleted["reflections"] = cur.rowcount
+
+        # Capsules — kept alive by last_used (set when injected into prompt)
+        days_cap = f"-{RETENTION_DAYS['capsules']} days"
+        cur = conn.execute(
+            "DELETE FROM capsules WHERE created_at < datetime('now', ?) AND "
+            "(last_used IS NULL OR last_used < datetime('now', ?))",
+            (days_cap, days_cap)
+        )
+        deleted["capsules"] = cur.rowcount
+
+        # Resolved bulletins older than 30 days (pending ones stay)
+        cur = conn.execute(
+            "DELETE FROM bulletin_board WHERE status != 'pending' AND "
+            "resolved_at IS NOT NULL AND resolved_at < datetime('now', ?)",
+            (f"-{RETENTION_DAYS['bulletins_resolved']} days",)
+        )
+        deleted["bulletins"] = cur.rowcount
+
+        conn.commit()
+        conn.close()
+        total = sum(deleted.values())
+        if total > 0:
+            logger.info(f"Self-Reflection cleanup: purged {deleted}")
+        return deleted
+    except Exception as e:
+        logger.error(f"Self-Reflection: cleanup error: {e}")
+        return {}
 
 
 # ─── Stats ───────────────────────────────────────────────────────────────────

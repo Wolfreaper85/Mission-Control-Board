@@ -120,6 +120,13 @@ def run(event):
 
         # Calculate VFM for this pattern
         vfm = _calculate_vfm(len(group), total_corrections, category)
+
+        # Touch these corrections — they're part of an active pattern, keep them alive
+        try:
+            module.touch_corrections([c['id'] for c in group])
+        except Exception:
+            pass
+
         if vfm < MIN_VFM_SCORE:
             continue
 
@@ -155,4 +162,12 @@ def run(event):
         proposals += 1
         logger.info(f"Self-Reflection: proposed rule promotion for '{category}' (VFM={vfm}, count={len(group)})")
 
-    return f"Scanned {total_corrections} corrections, created {proposals} proposals"
+    # Run retention cleanup
+    cleanup = {}
+    try:
+        cleanup = module.cleanup_old_data()
+    except Exception as e:
+        logger.error(f"Self-Reflection: cleanup during pattern scan failed: {e}")
+
+    purged = sum(cleanup.values()) if cleanup else 0
+    return f"Scanned {total_corrections} corrections, created {proposals} proposals, purged {purged} old records"

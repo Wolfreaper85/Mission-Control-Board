@@ -95,6 +95,10 @@ let _rulesCache = [];
 let _bulletinsCache = [];
 let _capsulesCache = [];
 let _reflectionStatsCache = {};
+// Track counts when user last dismissed overlays — glow only for NEW data
+let _seenBulletinPending = 0;
+let _seenReflectionTotal = 0;
+let _toolHealthDismissed = false;  // User dismissed the tool health warning this session
 
 // Launcher state
 let _launcherCards = []; // discovered plugins
@@ -112,6 +116,7 @@ let _pixelAnimTimer = null;
 let _offUser = null, _offAI = null; // offscreen canvases (629×1024, matching image)
 const _GW = 320, _GH = 520;        // game resolution for procedural mode
 let _pixelStyle = localStorage.getItem('mc-pixel-style') || 'chroma';
+let _workshopEnabled = localStorage.getItem('mc-workshop-enabled') !== 'false'; // default: on
 
 // ─── Launcher init ───────────────────────────────────────────────────────────
 
@@ -601,6 +606,12 @@ function _buildLayout() {
                 </div>
             </div>
             <input type="file" id="mc-import-file" accept=".json" style="display:none">
+            <div class="mc-tool-health-bar" id="mc-tool-health-bar" style="display:none">
+                <span class="mc-tool-health-icon">\u{26A0}</span>
+                <span class="mc-tool-health-text">Tool calling issue detected — AI may be writing tools as text. A fresh chat may help.</span>
+                <button class="mc-tool-health-nudge" id="mc-tool-health-nudge" title="Send a gentle reminder about available tools">\u{1F4A1} Nudge</button>
+                <button class="mc-tool-health-dismiss" id="mc-tool-health-dismiss" title="Dismiss">\u{2715}</button>
+            </div>
             <div class="mc-chat-messages" id="mc-chat-messages">
                 <div class="mc-chat-welcome">
                     <div class="mc-chat-welcome-icon">\u{1F3AF}</div>
@@ -640,6 +651,19 @@ function _buildLayout() {
                     </div>
                 </div>
             </header>
+
+            <!-- Self-Reflection Quick Bar -->
+            <div class="mc-reflect-bar">
+                <button class="mc-reflect-btn mc-reflect-btn-bulletin" id="mc-open-bulletin">
+                    <span class="mc-reflect-btn-icon">\u{1F4EC}</span>
+                    <span class="mc-reflect-btn-label">Bulletin Board</span>
+                    <span class="mc-badge mc-bulletin-bar-badge" id="mc-bulletin-bar-badge" style="display:none">0</span>
+                </button>
+                <button class="mc-reflect-btn mc-reflect-btn-brain" id="mc-open-reflection">
+                    <span class="mc-reflect-btn-icon">\u{1F9E0}</span>
+                    <span class="mc-reflect-btn-label">Self-Reflection</span>
+                </button>
+            </div>
 
             <!-- Stats Row -->
             <div class="mc-stats-row">
@@ -837,61 +861,6 @@ function _buildLayout() {
                 </div>
             </div>
 
-            <!-- Self-Reflection: Bulletin Board -->
-            <div class="mc-reflect-section" id="mc-bulletin-section">
-                <div class="mc-board-header">
-                    <h2 class="mc-section-title">\u{1F4EC} Bulletin Board</h2>
-                    <span class="mc-badge" id="mc-bulletin-badge" style="display:none">0</span>
-                </div>
-                <div class="mc-bulletin-list" id="mc-bulletin-list">
-                    <div class="mc-empty-sm">No requests yet \u2014 the AI will post here when it wants to propose changes</div>
-                </div>
-            </div>
-
-            <!-- Self-Reflection: Learned Rules -->
-            <div class="mc-reflect-section" id="mc-rules-section">
-                <div class="mc-board-header">
-                    <h2 class="mc-section-title">\u{1F9E0} Learned Rules</h2>
-                    <button class="mc-btn mc-btn-sm" id="mc-rule-new">\u{2795} Inject Rule</button>
-                </div>
-                <div class="mc-rules-list" id="mc-rules-list">
-                    <div class="mc-empty-sm">No rules yet \u2014 add one manually or approve a bulletin board promotion</div>
-                </div>
-            </div>
-
-            <!-- Self-Reflection: Corrections Log -->
-            <div class="mc-reflect-section" id="mc-corrections-section">
-                <div class="mc-board-header">
-                    <h2 class="mc-section-title">\u{1F6D1} Corrections</h2>
-                    <span class="mc-reflect-count" id="mc-corrections-count">0</span>
-                </div>
-                <div class="mc-corrections-list" id="mc-corrections-list">
-                    <div class="mc-empty-sm">No corrections detected yet</div>
-                </div>
-            </div>
-
-            <!-- Self-Reflection: Reflections -->
-            <div class="mc-reflect-section" id="mc-reflections-section">
-                <div class="mc-board-header">
-                    <h2 class="mc-section-title">\u{1F4AD} Reflections</h2>
-                    <span class="mc-reflect-count" id="mc-reflections-count">0</span>
-                </div>
-                <div class="mc-reflections-list" id="mc-reflections-list">
-                    <div class="mc-empty-sm">No reflections yet \u2014 the AI will self-evaluate after complex tasks</div>
-                </div>
-            </div>
-
-            <!-- Self-Reflection: Capsules -->
-            <div class="mc-reflect-section" id="mc-capsules-section">
-                <div class="mc-board-header">
-                    <h2 class="mc-section-title">\u{1F48A} Capsules</h2>
-                    <span class="mc-reflect-count" id="mc-capsules-count">0</span>
-                </div>
-                <div class="mc-capsules-grid" id="mc-capsules-grid">
-                    <div class="mc-empty-sm">No reasoning capsules captured yet</div>
-                </div>
-            </div>
-
             <!-- Schedule Calendar -->
             <div class="mc-calendar-section" id="mc-calendar-section">
                 <div class="mc-board-header">
@@ -908,10 +877,16 @@ function _buildLayout() {
             <div class="mc-pixel-section" id="mc-pixel-section">
                 <div class="mc-pixel-header">
                     <h2 class="mc-section-title">\u{1F3A8} Workshop</h2>
-                    <select class="mc-input mc-pixel-style-select" id="mc-pixel-style">
-                        <option value="chroma">Chroma Key (PNG Overlay)</option>
-                        <option value="procedural">Procedural Pixel Art</option>
-                    </select>
+                    <div class="mc-pixel-header-controls">
+                        <select class="mc-input mc-pixel-style-select" id="mc-pixel-style">
+                            <option value="chroma">Chroma Key (PNG Overlay)</option>
+                            <option value="procedural">Procedural Pixel Art</option>
+                        </select>
+                        <label class="mc-workshop-toggle" title="Toggle Workshop — saves resources when disabled">
+                            <input type="checkbox" id="mc-workshop-toggle">
+                            <span class="mc-workshop-toggle-slider"></span>
+                        </label>
+                    </div>
                 </div>
                 <div class="mc-pixel-stage">
                     <div class="mc-pixel-desk">
@@ -1081,6 +1056,52 @@ function _buildLayout() {
             </div>
         </div>
     </div>
+
+    <!-- Bulletin Board Overlay -->
+    <div class="mc-overlay" id="mc-bulletin-overlay" style="display:none">
+        <div class="mc-overlay-panel">
+            <div class="mc-overlay-header">
+                <h2>\u{1F4EC} Bulletin Board</h2>
+                <span class="mc-badge" id="mc-bulletin-badge" style="display:none">0</span>
+                <button class="mc-overlay-close" id="mc-bulletin-close">\u{2715}</button>
+            </div>
+            <div class="mc-overlay-body">
+                <p class="mc-overlay-hint">The AI posts requests here when it wants to propose changes. You approve or deny.</p>
+                <div class="mc-bulletin-list" id="mc-bulletin-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Self-Reflection Overlay (Tabbed) -->
+    <div class="mc-overlay" id="mc-reflection-overlay" style="display:none">
+        <div class="mc-overlay-panel mc-overlay-wide">
+            <div class="mc-overlay-header">
+                <h2>\u{1F9E0} Self-Reflection</h2>
+                <button class="mc-overlay-close" id="mc-reflection-close">\u{2715}</button>
+            </div>
+            <div class="mc-overlay-tabs">
+                <button class="mc-overlay-tab mc-overlay-tab-active" data-ref-tab="corrections">\u{1F50D} Corrections <span class="mc-reflect-count" id="mc-corrections-count">0</span></button>
+                <button class="mc-overlay-tab" data-ref-tab="reflections">\u{1F4AD} Reflections <span class="mc-reflect-count" id="mc-reflections-count">0</span></button>
+                <button class="mc-overlay-tab" data-ref-tab="rules">\u{1F4DC} Learned Rules <span class="mc-reflect-count" id="mc-rules-count">0</span></button>
+                <button class="mc-overlay-tab" data-ref-tab="capsules">\u{1F48A} Capsules <span class="mc-reflect-count" id="mc-capsules-count">0</span></button>
+            </div>
+            <div class="mc-overlay-body">
+                <div class="mc-overlay-tab-content" id="mc-ref-tab-corrections">
+                    <div class="mc-corrections-list" id="mc-corrections-list"></div>
+                </div>
+                <div class="mc-overlay-tab-content" id="mc-ref-tab-reflections" style="display:none">
+                    <div class="mc-reflections-list" id="mc-reflections-list"></div>
+                </div>
+                <div class="mc-overlay-tab-content" id="mc-ref-tab-rules" style="display:none">
+                    <div class="mc-rules-toolbar"><button class="mc-btn mc-btn-sm mc-btn-accent" id="mc-rule-new">\u{2795} Inject Rule</button></div>
+                    <div class="mc-rules-list" id="mc-rules-list"></div>
+                </div>
+                <div class="mc-overlay-tab-content" id="mc-ref-tab-capsules" style="display:none">
+                    <div class="mc-capsules-grid" id="mc-capsules-grid"></div>
+                </div>
+            </div>
+        </div>
+    </div>
     `;
 }
 
@@ -1125,6 +1146,20 @@ function _bindEvents(el) {
     sendBtn.addEventListener('click', () => _sendMessage());
     cancelBtn.addEventListener('click', () => _cancelStream());
 
+    // Tool health warning — nudge & dismiss
+    const healthNudge = el.querySelector('#mc-tool-health-nudge');
+    if (healthNudge) {
+        healthNudge.addEventListener('click', () => _sendToolNudge());
+    }
+    const healthDismiss = el.querySelector('#mc-tool-health-dismiss');
+    if (healthDismiss) {
+        healthDismiss.addEventListener('click', () => {
+            const bar = document.getElementById('mc-tool-health-bar');
+            if (bar) bar.style.display = 'none';
+            _toolHealthDismissed = true;
+        });
+    }
+
     input.addEventListener('keydown', e => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -1164,6 +1199,24 @@ function _bindEvents(el) {
             dd.style.display = 'none';
         }
     });
+
+    // Workshop toggle
+    const workshopToggle = el.querySelector('#mc-workshop-toggle');
+    if (workshopToggle) {
+        workshopToggle.checked = _workshopEnabled;
+        workshopToggle.addEventListener('change', () => {
+            _workshopEnabled = workshopToggle.checked;
+            localStorage.setItem('mc-workshop-enabled', _workshopEnabled ? 'true' : 'false');
+            const section = document.getElementById('mc-pixel-section');
+            if (_workshopEnabled) {
+                if (section) section.style.display = '';
+                _initPixelArt();
+            } else {
+                _stopPixelArt();
+                if (section) section.style.display = 'none';
+            }
+        });
+    }
 
     // Chat management
     el.querySelector('#mc-chat-switcher').addEventListener('click', () => _toggleChatDropdown());
@@ -1250,8 +1303,13 @@ function _bindEvents(el) {
 
 function _onShowDashboard() {
     _startDashboardPolling();
-    _setPixelState('idle');
-    _initPixelArt();
+    if (_workshopEnabled) {
+        _setPixelState('idle');
+        _initPixelArt();
+    } else {
+        const section = document.getElementById('mc-pixel-section');
+        if (section) section.style.display = 'none';
+    }
 }
 
 function _onHideDashboard() {
@@ -1616,6 +1674,10 @@ async function _switchChat(name) {
         });
         _setText('mc-chat-name', name);
         document.getElementById('mc-chat-dropdown').style.display = 'none';
+        // Reset tool health warning on chat switch — fresh chat = clean slate
+        _toolHealthDismissed = false;
+        const healthBar = document.getElementById('mc-tool-health-bar');
+        if (healthBar) healthBar.style.display = 'none';
         _loadChatHistory();
     } catch (e) {
         console.error('[MC] Switch chat failed:', e);
@@ -1815,6 +1877,9 @@ async function _sendMessage() {
     if (fullText.trim()) {
         _triggerTTS(fullText);
     }
+
+    // Tool health monitor — check if AI wrote tool calls as text
+    _checkToolHealth(fullText);
 
     // Auto-complete deployed goal or stamp a completed copy for permanent goals
     if (_deployedGoalId && _goalsCache.length > 0) {
@@ -2653,29 +2718,111 @@ function _initNotes() {
 
 // ─── Self-Reflection ────────────────────────────────────────────────────────
 
-function _loadReflectionData() {
+function _loadReflectionData(force) {
     const base = '/api/plugin/mission-control';
     const h = { 'X-CSRF-Token': CSRF() };
 
-    fetch(`${base}/corrections`, { headers: h }).then(r => r.json())
-        .then(d => { _correctionsCache = d.corrections || []; _renderCorrections(); })
-        .catch(e => console.error('[MC] Corrections load:', e));
+    // Load all in parallel, then update glows once everything is in
+    // Guard: don't overwrite cached data with empty responses (transient errors)
+    // force=true bypasses the guard (used after explicit deletes)
+    const _safeSet = (arr, cache) => force ? (arr || []) : ((arr && arr.length > 0) ? arr : (cache.length > 0 ? cache : arr || []));
 
-    fetch(`${base}/reflections`, { headers: h }).then(r => r.json())
-        .then(d => { _reflectionsCache = d.reflections || []; _renderReflections(); })
-        .catch(e => console.error('[MC] Reflections load:', e));
+    Promise.allSettled([
+        fetch(`${base}/corrections`, { headers: h }).then(r => r.json())
+            .then(d => { _correctionsCache = _safeSet(d.corrections, _correctionsCache); _renderCorrections(); }),
+        fetch(`${base}/reflections`, { headers: h }).then(r => r.json())
+            .then(d => { _reflectionsCache = _safeSet(d.reflections, _reflectionsCache); _renderReflections(); }),
+        fetch(`${base}/rules`, { headers: h }).then(r => r.json())
+            .then(d => { _rulesCache = _safeSet(d.rules, _rulesCache); _renderRules(); }),
+        fetch(`${base}/bulletins`, { headers: h }).then(r => r.json())
+            .then(d => { _bulletinsCache = _safeSet(d.bulletins, _bulletinsCache); _renderBulletins(); }),
+        fetch(`${base}/capsules`, { headers: h }).then(r => r.json())
+            .then(d => { _capsulesCache = _safeSet(d.capsules, _capsulesCache); _renderCapsules(); })
+    ]).then(() => _updateReflectionGlows());
+}
 
-    fetch(`${base}/rules`, { headers: h }).then(r => r.json())
-        .then(d => { _rulesCache = d.rules || []; _renderRules(); })
-        .catch(e => console.error('[MC] Rules load:', e));
+function _updateReflectionGlows() {
+    // Amber glow on Bulletin Board — only when there are MORE pending items than last seen
+    const bulletinBtn = document.getElementById('mc-open-bulletin');
+    if (bulletinBtn) {
+        const pending = _bulletinsCache.filter(b => b.status === 'pending').length;
+        bulletinBtn.classList.toggle('mc-glow-amber', pending > _seenBulletinPending);
+    }
+    // Cyan glow on Self-Reflection — only when total data count exceeds last seen
+    const refBtn = document.getElementById('mc-open-reflection');
+    if (refBtn) {
+        const total = _correctionsCache.length + _reflectionsCache.length + _capsulesCache.length;
+        refBtn.classList.toggle('mc-glow-cyan', total > _seenReflectionTotal);
+    }
+}
 
-    fetch(`${base}/bulletins`, { headers: h }).then(r => r.json())
-        .then(d => { _bulletinsCache = d.bulletins || []; _renderBulletins(); })
-        .catch(e => console.error('[MC] Bulletins load:', e));
+// ─── Tool Health Monitor ────────────────────────────────────────────────────
+// Detects when the AI writes tool calls as text instead of executing them.
+// Shows a gentle warning bar in the MC chat panel — no system-level override.
 
-    fetch(`${base}/capsules`, { headers: h }).then(r => r.json())
-        .then(d => { _capsulesCache = d.capsules || []; _renderCapsules(); })
-        .catch(e => console.error('[MC] Capsules load:', e));
+const _FAKE_TOOL_PATTERNS_JS = [
+    /<function_call>\s*\{/i,
+    /<tool_call>\s*\{/i,
+    /<\|tool_call\|>/i,
+    /"name"\s*:\s*"[a-z_]+"\s*,\s*"arguments"\s*:/i,
+    /(?:let me|i'll|i should|i'm going to)\s+(?:call|use|invoke|run)\s+(?:the\s+)?(?:`?[a-z_]+`?\s+)?(?:function|tool)/i,
+    /(?:calling|executing|running)\s+`?[a-z_]+\(/i,
+];
+
+function _checkToolHealth(responseText) {
+    if (_toolHealthDismissed) return;
+    if (!responseText || responseText.length < 30) return;
+
+    // Strip thinking tags
+    const clean = responseText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    if (!clean) return;
+
+    const hasFake = _FAKE_TOOL_PATTERNS_JS.some(p => p.test(clean));
+    if (hasFake) {
+        const bar = document.getElementById('mc-tool-health-bar');
+        if (bar) bar.style.display = '';
+    }
+}
+
+async function _sendToolNudge() {
+    // Fetch all available tools from Sapphire's API
+    let toolList = '';
+    try {
+        const resp = await fetch('/api/functions', { headers: { 'X-CSRF-Token': CSRF() } });
+        if (resp.ok) {
+            const data = await resp.json();
+            const tools = [];
+            if (data.modules) {
+                for (const [modName, mod] of Object.entries(data.modules)) {
+                    const enabled = (mod.functions || []).filter(f => f.enabled);
+                    if (enabled.length > 0) {
+                        const names = enabled.map(f => f.name).join(', ');
+                        tools.push(`${modName}: ${names}`);
+                    }
+                }
+            }
+            if (tools.length > 0) {
+                toolList = '\n\nYour currently available tools by module:\n' + tools.join('\n');
+            }
+        }
+    } catch (e) {
+        console.error('[MC] Failed to fetch tool list for nudge:', e);
+    }
+
+    const nudgeText = `Hey, just a heads up — you have tools available that you can execute as function calls. ` +
+        `You don't need to write them out as text in your response. ` +
+        `Just call them directly the way you normally would.${toolList}`;
+
+    // Send it through the chat as a user message
+    const input = document.getElementById('mc-chat-input');
+    if (input) {
+        input.value = nudgeText;
+        _sendMessage();
+    }
+
+    // Hide the warning bar after nudging
+    const bar = document.getElementById('mc-tool-health-bar');
+    if (bar) bar.style.display = 'none';
 }
 
 function _fmtDate(ts) {
@@ -2691,11 +2838,11 @@ function _renderBulletins() {
     const el = document.getElementById('mc-bulletin-list');
     if (!el) return;
     const badge = document.getElementById('mc-bulletin-badge');
+    const barBadge = document.getElementById('mc-bulletin-bar-badge');
     const pending = _bulletinsCache.filter(b => b.status === 'pending');
-    if (badge) {
-        badge.textContent = pending.length;
-        badge.style.display = pending.length > 0 ? 'inline-block' : 'none';
-    }
+    [badge, barBadge].forEach(b => {
+        if (b) { b.textContent = pending.length; b.style.display = pending.length > 0 ? 'inline-block' : 'none'; }
+    });
     if (_bulletinsCache.length === 0) {
         el.innerHTML = '<div class="mc-empty-sm">No requests yet \u2014 the AI will post here when it wants to propose changes</div>';
         return;
@@ -2744,7 +2891,7 @@ async function _updateBulletinStatus(id, status) {
             headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
             body: JSON.stringify({ id: parseInt(id), status })
         });
-        _loadReflectionData();
+        _loadReflectionData(true);
     } catch (e) { console.error('[MC] Bulletin update error:', e); }
 }
 
@@ -2756,7 +2903,7 @@ async function _deleteBulletin(id) {
             headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
             body: JSON.stringify({ id: parseInt(id) })
         });
-        _loadReflectionData();
+        _loadReflectionData(true);
     } catch (e) { console.error('[MC] Bulletin delete error:', e); }
 }
 
@@ -2764,7 +2911,9 @@ async function _deleteBulletin(id) {
 
 function _renderRules() {
     const el = document.getElementById('mc-rules-list');
+    const countEl = document.getElementById('mc-rules-count');
     if (!el) return;
+    if (countEl) countEl.textContent = _rulesCache.length;
     if (_rulesCache.length === 0) {
         el.innerHTML = '<div class="mc-empty-sm">No rules yet \u2014 add one manually or approve a bulletin board promotion</div>';
         return;
@@ -2794,7 +2943,7 @@ function _renderRules() {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
                     body: JSON.stringify({ id: parseInt(cb.dataset.id), active: cb.checked })
                 });
-                _loadReflectionData();
+                _loadReflectionData(true);
             } catch (e) { console.error('[MC] Rule toggle error:', e); }
         });
     });
@@ -2808,7 +2957,7 @@ function _renderRules() {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
                     body: JSON.stringify({ id: parseInt(btn.dataset.id) })
                 });
-                _loadReflectionData();
+                _loadReflectionData(true);
             } catch (e) { console.error('[MC] Rule delete error:', e); }
         });
     });
@@ -2846,7 +2995,7 @@ function _renderCorrections() {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
                     body: JSON.stringify({ id: parseInt(btn.dataset.id) })
                 });
-                _loadReflectionData();
+                _loadReflectionData(true);
             } catch (e) { console.error('[MC] Correction delete error:', e); }
         });
     });
@@ -2885,7 +3034,7 @@ function _renderReflections() {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
                     body: JSON.stringify({ id: parseInt(btn.dataset.id) })
                 });
-                _loadReflectionData();
+                _loadReflectionData(true);
             } catch (e) { console.error('[MC] Reflection delete error:', e); }
         });
     });
@@ -2923,7 +3072,7 @@ function _renderCapsules() {
                     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
                     body: JSON.stringify({ id: parseInt(btn.dataset.id) })
                 });
-                _loadReflectionData();
+                _loadReflectionData(true);
             } catch (e) { console.error('[MC] Capsule delete error:', e); }
         });
     });
@@ -2934,7 +3083,58 @@ function _renderCapsules() {
 function _initReflection() {
     _loadReflectionData();
 
-    // Rule injection modal
+    // ── Overlay open/close ──
+    const bulletinOverlay = document.getElementById('mc-bulletin-overlay');
+    const reflectionOverlay = document.getElementById('mc-reflection-overlay');
+
+    document.getElementById('mc-open-bulletin')?.addEventListener('click', () => {
+        bulletinOverlay.style.display = 'flex';
+        // Re-render from cache immediately, then refresh from server
+        _renderBulletins();
+        _loadReflectionData();
+    });
+    document.getElementById('mc-open-reflection')?.addEventListener('click', () => {
+        reflectionOverlay.style.display = 'flex';
+        // Re-render from cache immediately, then refresh from server
+        _renderCorrections();
+        _renderReflections();
+        _renderRules();
+        _renderCapsules();
+        _loadReflectionData();
+    });
+    const _closeBulletin = () => {
+        bulletinOverlay.style.display = 'none';
+        // Mark current pending count as "seen" — glow only returns for NEW pending items
+        _seenBulletinPending = _bulletinsCache.filter(b => b.status === 'pending').length;
+        document.getElementById('mc-open-bulletin')?.classList.remove('mc-glow-amber');
+    };
+    const _closeReflection = () => {
+        reflectionOverlay.style.display = 'none';
+        // Mark current totals as "seen" — glow only returns for NEW data
+        _seenReflectionTotal = _correctionsCache.length + _reflectionsCache.length + _capsulesCache.length;
+        document.getElementById('mc-open-reflection')?.classList.remove('mc-glow-cyan');
+    };
+
+    document.getElementById('mc-bulletin-close')?.addEventListener('click', _closeBulletin);
+    document.getElementById('mc-reflection-close')?.addEventListener('click', _closeReflection);
+
+    // Close on backdrop click
+    bulletinOverlay?.addEventListener('click', e => { if (e.target === bulletinOverlay) _closeBulletin(); });
+    reflectionOverlay?.addEventListener('click', e => { if (e.target === reflectionOverlay) _closeReflection(); });
+
+    // ── Self-Reflection tab switching ──
+    document.querySelectorAll('.mc-overlay-tab[data-ref-tab]').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const tabName = tab.dataset.refTab;
+            document.querySelectorAll('.mc-overlay-tab[data-ref-tab]').forEach(t => t.classList.remove('mc-overlay-tab-active'));
+            tab.classList.add('mc-overlay-tab-active');
+            document.querySelectorAll('.mc-overlay-tab-content').forEach(c => c.style.display = 'none');
+            const target = document.getElementById('mc-ref-tab-' + tabName);
+            if (target) target.style.display = '';
+        });
+    });
+
+    // ── Rule injection modal ──
     const newRuleBtn = document.getElementById('mc-rule-new');
     if (newRuleBtn) {
         newRuleBtn.addEventListener('click', () => {
@@ -2961,7 +3161,7 @@ function _initReflection() {
                     body: JSON.stringify({ rule })
                 });
                 closeRule();
-                _loadReflectionData();
+                _loadReflectionData(true);
             } catch (e) { console.error('[MC] Rule save error:', e); }
         });
     }
@@ -6097,6 +6297,23 @@ select.mc-input { cursor: pointer; }
 
 /* ─── 16-Bit Pixel Art Workshop ─── */
 .mc-pixel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.mc-pixel-header-controls { display: flex; align-items: center; gap: 10px; }
+
+/* Workshop toggle switch */
+.mc-workshop-toggle {
+    position: relative; display: inline-block; width: 36px; height: 20px; cursor: pointer; flex-shrink: 0;
+}
+.mc-workshop-toggle input { opacity: 0; width: 0; height: 0; }
+.mc-workshop-toggle-slider {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: #2a2a3a; border-radius: 10px; transition: 0.3s;
+}
+.mc-workshop-toggle-slider::before {
+    content: ''; position: absolute; height: 14px; width: 14px; left: 3px; bottom: 3px;
+    background: #555; border-radius: 50%; transition: 0.3s;
+}
+.mc-workshop-toggle input:checked + .mc-workshop-toggle-slider { background: rgba(79,195,247,0.3); }
+.mc-workshop-toggle input:checked + .mc-workshop-toggle-slider::before { transform: translateX(16px); background: #4fc3f7; }
 .mc-pixel-style-select { width: auto; max-width: 220px; font-size: 0.78rem; padding: 4px 8px; }
 .mc-pixel-section { background: #111118; border: 1px solid #1a1a24; border-radius: 10px; padding: 12px; margin-top: 16px; overflow: hidden; }
 .mc-pixel-stage { display: flex; align-items: center; justify-content: center; gap: 0; position: relative; border-radius: 8px; border: 1px solid #1a1a24; overflow: hidden; background: #080810; }
@@ -6211,7 +6428,7 @@ select.mc-input { cursor: pointer; }
 .mc-rule-dates { font-size: 0.65rem; color: #444; }
 
 /* Corrections */
-.mc-corrections-list { display: flex; flex-direction: column; gap: 6px; max-height: 400px; overflow-y: auto; }
+.mc-corrections-list { display: flex; flex-direction: column; gap: 6px; }
 .mc-correction-card { background: #0d0d14; border: 1px solid #1a1a24; border-radius: 8px; padding: 10px 14px; }
 .mc-correction-top { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
 .mc-correction-cat { font-size: 0.7rem; color: #ff9800; background: rgba(255,152,0,0.1); padding: 1px 6px; border-radius: 4px; text-transform: uppercase; }
@@ -6219,7 +6436,7 @@ select.mc-input { cursor: pointer; }
 .mc-correction-text { font-size: 0.82rem; color: #999; line-height: 1.4; }
 
 /* Reflections */
-.mc-reflections-list { display: flex; flex-direction: column; gap: 10px; max-height: 500px; overflow-y: auto; }
+.mc-reflections-list { display: flex; flex-direction: column; gap: 10px; }
 .mc-reflection-card { background: #0d0d14; border: 1px solid #1a1a24; border-radius: 8px; padding: 12px 14px; }
 .mc-reflection-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .mc-reflection-context { font-size: 0.8rem; color: #ccc; font-weight: 600; flex: 1; }
@@ -6240,6 +6457,119 @@ select.mc-input { cursor: pointer; }
 
 /* Rule injection modal hint */
 .mc-modal-hint { font-size: 0.8rem; color: #888; line-height: 1.5; margin-bottom: 12px; padding: 8px 12px; background: rgba(79,195,247,0.05); border: 1px solid rgba(79,195,247,0.15); border-radius: 6px; }
+
+/* ─── Reflect Quick-Bar ─── */
+.mc-reflect-bar { display: flex; gap: 10px; padding: 0 24px; margin-bottom: 8px; }
+.mc-reflect-btn {
+    display: flex; align-items: center; gap: 8px;
+    background: linear-gradient(135deg, #111118 0%, #161622 100%);
+    border: 1px solid #1e1e2e; border-radius: 10px;
+    padding: 10px 18px; cursor: pointer;
+    color: #ccc; font-size: 0.85rem; font-weight: 600;
+    transition: all 0.2s;
+    position: relative;
+}
+.mc-reflect-btn:hover { border-color: #3a3a5a; background: linear-gradient(135deg, #161622 0%, #1c1c30 100%); color: #fff; transform: translateY(-1px); }
+.mc-reflect-btn-icon { font-size: 1.1rem; }
+.mc-reflect-btn .mc-badge { position: absolute; top: -4px; right: -4px; }
+
+/* Neon pulse glow — amber (Bulletin Board pending) */
+.mc-glow-amber {
+    border-color: rgba(255,193,7,0.5) !important;
+    box-shadow: 0 0 8px rgba(255,193,7,0.25), 0 0 20px rgba(255,193,7,0.12), inset 0 0 8px rgba(255,193,7,0.06);
+    animation: mc-pulse-amber 2s ease-in-out infinite;
+}
+@keyframes mc-pulse-amber {
+    0%, 100% { box-shadow: 0 0 8px rgba(255,193,7,0.25), 0 0 20px rgba(255,193,7,0.12), inset 0 0 8px rgba(255,193,7,0.06); border-color: rgba(255,193,7,0.5); }
+    50% { box-shadow: 0 0 14px rgba(255,193,7,0.45), 0 0 36px rgba(255,193,7,0.2), inset 0 0 12px rgba(255,193,7,0.1); border-color: rgba(255,193,7,0.7); }
+}
+
+/* Neon pulse glow — cyan (Self-Reflection has data) */
+.mc-glow-cyan {
+    border-color: rgba(79,195,247,0.5) !important;
+    box-shadow: 0 0 8px rgba(79,195,247,0.25), 0 0 20px rgba(79,195,247,0.12), inset 0 0 8px rgba(79,195,247,0.06);
+    animation: mc-pulse-cyan 2.5s ease-in-out infinite;
+}
+@keyframes mc-pulse-cyan {
+    0%, 100% { box-shadow: 0 0 8px rgba(79,195,247,0.25), 0 0 20px rgba(79,195,247,0.12), inset 0 0 8px rgba(79,195,247,0.06); border-color: rgba(79,195,247,0.5); }
+    50% { box-shadow: 0 0 14px rgba(79,195,247,0.45), 0 0 36px rgba(79,195,247,0.2), inset 0 0 12px rgba(79,195,247,0.1); border-color: rgba(79,195,247,0.7); }
+}
+
+/* ─── Tool Health Warning Bar ─── */
+.mc-tool-health-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: linear-gradient(135deg, rgba(255,152,0,0.12) 0%, rgba(255,87,34,0.10) 100%);
+    border: 1px solid rgba(255,152,0,0.3);
+    border-radius: 8px;
+    margin: 6px 8px 0;
+    font-size: 0.78rem;
+    color: #ffb74d;
+    animation: mc-health-fade-in 0.4s ease;
+}
+.mc-tool-health-icon { font-size: 1rem; flex-shrink: 0; }
+.mc-tool-health-text { flex: 1; line-height: 1.35; }
+.mc-tool-health-nudge {
+    background: rgba(255,152,0,0.15); border: 1px solid rgba(255,152,0,0.3); color: #ffb74d;
+    cursor: pointer; font-size: 0.72rem; padding: 3px 10px; border-radius: 6px; flex-shrink: 0;
+    white-space: nowrap; transition: all 0.2s;
+}
+.mc-tool-health-nudge:hover { background: rgba(255,152,0,0.25); border-color: rgba(255,152,0,0.5); color: #ffe0b2; }
+.mc-tool-health-dismiss {
+    background: none; border: none; color: rgba(255,152,0,0.6); cursor: pointer;
+    font-size: 0.9rem; padding: 2px 4px; border-radius: 4px; flex-shrink: 0;
+}
+.mc-tool-health-dismiss:hover { color: #ffb74d; background: rgba(255,152,0,0.15); }
+@keyframes mc-health-fade-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Overlays (Full-page views) ─── */
+.mc-overlay {
+    position: fixed; inset: 0; z-index: 9000;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+}
+.mc-overlay-panel {
+    background: #0a0a12; border: 1px solid #1e1e2e; border-radius: 14px;
+    width: 90%; max-width: 640px; max-height: 85vh;
+    display: flex; flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    animation: mc-overlay-in 0.2s ease-out;
+}
+.mc-overlay-wide { max-width: 800px; }
+@keyframes mc-overlay-in { from { opacity: 0; transform: translateY(20px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.mc-overlay-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 16px 20px; border-bottom: 1px solid #1a1a24;
+}
+.mc-overlay-header h2 { margin: 0; font-size: 1.1rem; color: #e0e0e0; flex: 1; }
+.mc-overlay-close {
+    background: none; border: none; color: #666; font-size: 1.2rem;
+    cursor: pointer; padding: 4px 8px; border-radius: 6px; transition: all 0.15s;
+}
+.mc-overlay-close:hover { color: #fff; background: rgba(255,255,255,0.08); }
+.mc-overlay-hint { font-size: 0.8rem; color: #777; line-height: 1.5; margin-bottom: 14px; }
+.mc-overlay-body { padding: 16px 20px; overflow-y: auto; flex: 1; }
+
+/* Overlay Tabs */
+.mc-overlay-tabs {
+    display: flex; gap: 0; padding: 0 20px; border-bottom: 1px solid #1a1a24;
+    overflow-x: auto;
+}
+.mc-overlay-tab {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: #777; font-size: 0.82rem; padding: 10px 14px;
+    cursor: pointer; transition: all 0.15s; white-space: nowrap;
+    display: flex; align-items: center; gap: 6px;
+}
+.mc-overlay-tab:hover { color: #ccc; }
+.mc-overlay-tab-active { color: #fff; border-bottom-color: #4fc3f7; }
+.mc-overlay-tab .mc-reflect-count { font-size: 0.65rem; }
+.mc-rules-toolbar { display: flex; justify-content: flex-end; margin-bottom: 10px; }
 
 /* Responsive */
 @media (max-width: 1100px) {

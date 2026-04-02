@@ -10,7 +10,9 @@
         "web": true,
         "hooks": {
             "pre_chat": "hooks/pre_chat.py",
+            "pre_execute": "hooks/pre_execute.py",
             "post_chat": "hooks/post_chat.py",
+            "post_execute": "hooks/post_execute.py",
             "prompt_inject": "hooks/prompt_inject.py"
         },
         "schedule": [
@@ -19,6 +21,13 @@
                 "cron": "0 3 * * *",
                 "handler": "schedule/pattern_scan.py",
                 "description": "Daily scan for correction patterns, VFM scoring, and bulletin board rule proposals",
+                "enabled": true
+            },
+            {
+                "name": "MC Health Digest",
+                "cron": "0 22 * * *",
+                "handler": "schedule/health_digest.py",
+                "description": "Daily system health summary posted to Discord — goals, memories, self-reflection activity",
                 "enabled": true
             }
         ],
@@ -78,6 +87,20 @@
                 "label": "Daily Pattern Scan",
                 "default": true,
                 "help": "Run daily analysis to detect recurring correction patterns and propose rule promotions"
+            },
+            {
+                "key": "health_digest",
+                "type": "boolean",
+                "label": "Health Digest",
+                "default": true,
+                "help": "Post a daily system health summary to Discord — goals, memories, self-reflection activity"
+            },
+            {
+                "key": "digest_channel",
+                "type": "string",
+                "label": "Digest Discord Channel",
+                "default": "ai-updates",
+                "help": "Discord channel name for health digest posts"
             }
         ],
         "routes": [

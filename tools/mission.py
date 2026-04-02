@@ -14,7 +14,7 @@ def _find_goals_db():
 ENABLED = True
 EMOJI = '\U0001f3af'
 
-AVAILABLE_FUNCTIONS = ['mission_status', 'take_note', 'search_notes', 'list_notes', 'self_reflect', 'get_learned_rules', 'post_bulletin', 'get_bulletins']
+AVAILABLE_FUNCTIONS = ['mission_status', 'take_note', 'search_notes', 'list_notes', 'self_reflect', 'get_learned_rules', 'post_bulletin', 'get_bulletins', 'keep_data', 'edit_memory']
 
 TOOLS = [
     {
@@ -106,7 +106,7 @@ TOOLS = [
         "is_local": True,
         "function": {
             "name": "self_reflect",
-            "description": "Record a self-reflection about a task you just completed. Use after complex multi-step work, debugging, or when you notice something you could do better. This helps you improve over time.",
+            "description": "CALL THIS FUNCTION to record a self-reflection about a task you completed — do NOT write reflections in chat text, invoke this tool. Use after complex work, debugging, or when you notice something you could improve.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -154,7 +154,7 @@ TOOLS = [
         "is_local": True,
         "function": {
             "name": "post_bulletin",
-            "description": "Post a request to the Mission Control Bulletin Board for user approval. Use when you notice a recurring need and want to propose a standing order, schedule, rule, or new capability. The user will approve or deny your request.",
+            "description": "CALL THIS FUNCTION to submit a request to the Mission Control Bulletin Board — do NOT write the request in your chat response, you must invoke this tool. Use when you want to propose a standing order, rule promotion, schedule, or new capability for the user to approve or deny.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -202,6 +202,56 @@ TOOLS = [
                 "required": []
             }
         }
+    },
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "keep_data",
+            "description": "CALL THIS FUNCTION to mark self-reflection data as still useful, resetting its retention timer so it won't be auto-purged. Use when you reference a past correction, reflection, or capsule worth keeping. Retention limits: corrections 30d, reflections 60d, capsules 90d — this resets the clock.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "data_type": {
+                        "type": "string",
+                        "enum": ["corrections", "reflections", "capsules"],
+                        "description": "Which type of data to keep alive"
+                    },
+                    "ids": {
+                        "type": "array",
+                        "items": { "type": "integer" },
+                        "description": "List of record IDs to keep alive"
+                    }
+                },
+                "required": ["data_type", "ids"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "edit_memory",
+            "description": "Edit an existing memory entry — update its content, label, or both. Use when you want to add more detail to a memory, fix a mistake, or re-categorize it. The memory's keywords and embeddings are automatically regenerated. Use search_memory first to find the memory ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "memory_id": {
+                        "type": "integer",
+                        "description": "The ID of the memory to edit"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "The updated memory content (max 512 chars). Provide the full new content, not just the changes."
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "Optional category label (e.g. 'preference', 'technical', 'people', 'routine')"
+                    }
+                },
+                "required": ["memory_id", "content"]
+            }
+        }
     }
 ]
 
@@ -224,6 +274,10 @@ def execute(function_name, arguments, config):
         return _post_bulletin(arguments, config)
     elif function_name == "get_bulletins":
         return _get_bulletins(arguments, config)
+    elif function_name == "keep_data":
+        return _keep_data(arguments, config)
+    elif function_name == "edit_memory":
+        return _edit_memory(arguments, config)
     return "Unknown function", False
 
 
@@ -563,3 +617,126 @@ def _get_bulletins(arguments, config):
         return "\n".join(lines), True
     except Exception as e:
         return f"Error: {e}", False
+
+
+def _keep_data(arguments, config):
+    """Reset retention timer on self-reflection data the AI finds useful."""
+    import importlib.util
+    import sys
+
+    data_type = arguments.get("data_type")
+    ids = arguments.get("ids", [])
+
+    if not data_type or not ids:
+        return "Error: data_type and ids are required", False
+
+    valid_types = ["corrections", "reflections", "capsules"]
+    if data_type not in valid_types:
+        return f"Error: data_type must be one of {valid_types}", False
+
+    try:
+        plugin_file = Path(__file__).parent.parent / "plugin.py"
+        spec = importlib.util.spec_from_file_location("_mc_reflection_plugin", plugin_file)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["_mc_reflection_plugin"] = module
+        spec.loader.exec_module(module)
+
+        touch_fn = {
+            "corrections": module.touch_corrections,
+            "reflections": module.touch_reflections,
+            "capsules": module.touch_capsules
+        }[data_type]
+
+        touch_fn(ids)
+        return f"\u2705 Kept {len(ids)} {data_type} alive \u2014 retention timer reset", True
+    except Exception as e:
+        return f"Error: {e}", False
+
+
+def _edit_memory(arguments, config):
+    """Edit an existing memory — updates content, keywords, embeddings, and optional label."""
+    import sqlite3
+    import re
+
+    memory_id = arguments.get("memory_id")
+    content = arguments.get("content", "").strip()
+    label = arguments.get("label")
+
+    if not memory_id:
+        return "Error: memory_id is required", False
+    if not content:
+        return "Error: content is required", False
+    if len(content) > 512:
+        return f"Error: content too long ({len(content)} chars, max 512)", False
+
+    # Find memory.db
+    memory_db = None
+    for i in range(6):
+        candidate = Path(__file__).parents[i] / "user" / "memory.db"
+        if candidate.exists():
+            memory_db = candidate
+            break
+
+    if not memory_db:
+        return "Error: memory database not found", False
+
+    try:
+        conn = sqlite3.connect(str(memory_db), timeout=5)
+        conn.row_factory = sqlite3.Row
+
+        # Verify memory exists
+        row = conn.execute("SELECT id, content, scope FROM memories WHERE id = ?", (int(memory_id),)).fetchone()
+        if not row:
+            conn.close()
+            return f"Error: memory #{memory_id} not found", False
+
+        scope = row["scope"]
+        old_content = row["content"]
+
+        # Extract keywords (same logic as Sapphire core)
+        stopwords = {"the", "a", "an", "is", "are", "was", "were", "be", "been",
+                     "have", "has", "had", "do", "does", "did", "will", "would",
+                     "could", "should", "can", "to", "of", "in", "for", "on",
+                     "with", "at", "by", "from", "as", "and", "or", "but", "not",
+                     "this", "that", "it", "i", "me", "my", "he", "she", "his",
+                     "her", "we", "they", "them", "you", "your"}
+        words = re.findall(r'[a-z]+', content.lower())
+        keywords = " ".join(sorted(set(w for w in words if len(w) >= 3 and w not in stopwords)))
+
+        # Try to generate embedding via Sapphire's embedder
+        embedding_blob = None
+        try:
+            from functions.memory import _get_embedder
+            embedder = _get_embedder()
+            if embedder.available:
+                embs = embedder.embed([content], prefix='search_document')
+                if embs is not None:
+                    embedding_blob = embs[0].tobytes()
+        except Exception:
+            pass  # Embedding update is optional
+
+        # Update the memory
+        if label is not None:
+            conn.execute(
+                "UPDATE memories SET content = ?, keywords = ?, label = ?, embedding = ?, "
+                "timestamp = CURRENT_TIMESTAMP WHERE id = ? AND scope = ?",
+                (content, keywords, label.lower().strip() if label else None, embedding_blob, int(memory_id), scope)
+            )
+        else:
+            conn.execute(
+                "UPDATE memories SET content = ?, keywords = ?, embedding = ?, "
+                "timestamp = CURRENT_TIMESTAMP WHERE id = ? AND scope = ?",
+                (content, keywords, embedding_blob, int(memory_id), scope)
+            )
+
+        conn.commit()
+        conn.close()
+
+        return (
+            f"\u2705 Memory #{memory_id} updated.\n"
+            f"**Before:** {old_content[:150]}{'...' if len(old_content) > 150 else ''}\n"
+            f"**After:** {content[:150]}{'...' if len(content) > 150 else ''}"
+        ), True
+
+    except Exception as e:
+        return f"Error editing memory: {e}", False
