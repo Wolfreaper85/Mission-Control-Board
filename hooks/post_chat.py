@@ -240,7 +240,7 @@ def post_chat(event):
         system = event.metadata.get("system")
         if system and hasattr(system, "llm_chat") and system.llm_chat:
             try:
-                scope = system.llm_chat.session_manager.active_scope or "default"
+                scope = system.llm_chat.session_manager.current_settings.get("memory_scope", "default")
             except Exception:
                 pass
         _detect_fake_tool_calls(response_text, scope)
@@ -257,7 +257,7 @@ def post_chat(event):
     system = event.metadata.get("system")
     if system and hasattr(system, "llm_chat") and system.llm_chat:
         try:
-            scope = system.llm_chat.session_manager.active_scope or "default"
+            scope = system.llm_chat.session_manager.current_settings.get("memory_scope", "default")
         except Exception:
             pass
 
