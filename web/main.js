@@ -1328,6 +1328,7 @@ function _bindEvents(el) {
         _selectedMemoryScope = e.target.value;
         _mindDataCache = {};  // Clear mind cache on scope change
         _loadStats();
+        _loadReflectionData(true); // Reload reflection data for new scope
         // Reload active mind tab if drawer is open
         const drawer = document.getElementById('mc-mind-drawer');
         const activeBtn = el.querySelector('.mc-mind-btn-active');
@@ -2887,6 +2888,8 @@ function _initNotes() {
 function _loadReflectionData(force) {
     const base = '/api/plugin/mission-control';
     const h = { 'X-CSRF-Token': CSRF() };
+    const scope = _selectedMemoryScope || 'default';
+    const sq = `?scope=${encodeURIComponent(scope)}`;
 
     // Load all in parallel, then update glows once everything is in
     // Guard: don't overwrite cached data with empty responses (transient errors)
@@ -2894,15 +2897,15 @@ function _loadReflectionData(force) {
     const _safeSet = (arr, cache) => force ? (arr || []) : ((arr && arr.length > 0) ? arr : (cache.length > 0 ? cache : arr || []));
 
     Promise.allSettled([
-        fetch(`${base}/corrections`, { headers: h }).then(r => r.json())
+        fetch(`${base}/corrections${sq}`, { headers: h }).then(r => r.json())
             .then(d => { _correctionsCache = _safeSet(d.corrections, _correctionsCache); _renderCorrections(); }),
-        fetch(`${base}/reflections`, { headers: h }).then(r => r.json())
+        fetch(`${base}/reflections${sq}`, { headers: h }).then(r => r.json())
             .then(d => { _reflectionsCache = _safeSet(d.reflections, _reflectionsCache); _renderReflections(); }),
-        fetch(`${base}/rules`, { headers: h }).then(r => r.json())
+        fetch(`${base}/rules${sq}`, { headers: h }).then(r => r.json())
             .then(d => { _rulesCache = _safeSet(d.rules, _rulesCache); _renderRules(); }),
-        fetch(`${base}/bulletins`, { headers: h }).then(r => r.json())
+        fetch(`${base}/bulletins${sq}`, { headers: h }).then(r => r.json())
             .then(d => { _bulletinsCache = _safeSet(d.bulletins, _bulletinsCache); _renderBulletins(); }),
-        fetch(`${base}/capsules`, { headers: h }).then(r => r.json())
+        fetch(`${base}/capsules${sq}`, { headers: h }).then(r => r.json())
             .then(d => { _capsulesCache = _safeSet(d.capsules, _capsulesCache); _renderCapsules(); })
     ]).then(() => _updateReflectionGlows());
 }
