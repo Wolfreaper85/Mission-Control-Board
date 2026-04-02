@@ -642,6 +642,7 @@ function _buildLayout() {
                     <p class="mc-date">${dateStr} &middot; <span id="mc-live-clock"></span> &middot; <span id="mc-tasks-remaining">0 tasks remaining</span></p>
                 </div>
                 <div class="mc-header-right">
+                    <button class="mc-guide-btn" id="mc-open-guide" title="Open Guide">\u{1F4D6} Guide</button>
                     <div class="mc-agent-status" id="mc-agent-badge">
                         <span class="mc-status-dot mc-dot-idle"></span>
                         <div class="mc-status-text">
@@ -1096,6 +1097,162 @@ function _buildLayout() {
             </div>
         </div>
     </div>
+
+    <!-- Guide Overlay -->
+    <div class="mc-overlay" id="mc-guide-overlay" style="display:none">
+        <div class="mc-overlay-panel mc-overlay-wide mc-guide-panel">
+            <div class="mc-overlay-header">
+                <h3>\u{1F4D6} Mission Control Guide</h3>
+                <button class="mc-overlay-close" id="mc-guide-close">\u{2715}</button>
+            </div>
+            <div class="mc-guide-nav">
+                <button class="mc-guide-nav-btn mc-guide-nav-active" data-guide="overview">\u{1F3AF} Overview</button>
+                <button class="mc-guide-nav-btn" data-guide="goals">\u{1F4CB} Goals</button>
+                <button class="mc-guide-nav-btn" data-guide="schedule">\u{1F4C5} Schedule</button>
+                <button class="mc-guide-nav-btn" data-guide="chat">\u{1F4AC} Chat</button>
+                <button class="mc-guide-nav-btn" data-guide="reflection">\u{1F50D} Self-Reflection</button>
+                <button class="mc-guide-nav-btn" data-guide="bulletin">\u{1F4CC} Bulletin Board</button>
+                <button class="mc-guide-nav-btn" data-guide="memory">\u{1F9E0} Memory</button>
+                <button class="mc-guide-nav-btn" data-guide="launcher">\u{1F680} Launcher</button>
+                <button class="mc-guide-nav-btn" data-guide="workshop">\u{1F3A8} Workshop</button>
+                <button class="mc-guide-nav-btn" data-guide="settings">\u{2699}\u{FE0F} Settings</button>
+            </div>
+            <div class="mc-overlay-body mc-guide-body">
+                <div class="mc-guide-section" data-guide-section="overview">
+                    <h4>What is Mission Control?</h4>
+                    <p>Mission Control is your AI command center — a single dashboard to manage goals, schedule tasks, chat with your AI, and monitor how it learns and improves over time.</p>
+                    <p>It's built as a plugin for Sapphire, meaning it runs alongside your AI without modifying any core files. Everything stays in the plugin folder.</p>
+                    <h4>Dashboard Layout</h4>
+                    <p><strong>Left side:</strong> Chat panel — talk to your AI, switch personas, manage conversations.</p>
+                    <p><strong>Right side:</strong> Dashboard — stats cards at top, goals board, notes, schedule calendar, and workshop below.</p>
+                    <p><strong>Top bar:</strong> Stat cards showing total goals, completed, active, memory/mind, this guide, and agent status.</p>
+                    <h4>Quick Actions</h4>
+                    <p><strong>Bulletin Board button</strong> (top) — Opens AI requests. Glows amber when there's something new.</p>
+                    <p><strong>Self-Reflection button</strong> (top) — Opens corrections, reflections, learned rules, and capsules. Glows cyan when there's new data.</p>
+                </div>
+                <div class="mc-guide-section" data-guide-section="goals" style="display:none">
+                    <h4>Goals Board</h4>
+                    <p>A kanban-style board with four columns: <strong>Permanent</strong>, <strong>Active</strong>, <strong>Completed</strong>, and <strong>Abandoned</strong>.</p>
+                    <h4>Creating Goals</h4>
+                    <p>Click <strong>+ New Goal</strong> to create one. Set a title, description, priority (critical/high/medium/low), and status.</p>
+                    <h4>Permanent Goals</h4>
+                    <p>Goals marked as permanent never get consumed. When you deploy a permanent goal to chat, a timestamped copy is created in Completed while the original stays in Permanent. Great for recurring tasks like "Review pull requests" or "Check system health".</p>
+                    <h4>Deploying Goals</h4>
+                    <p>Click the rocket icon on a goal card to deploy it to the chat panel. The AI receives the goal as context and works on it. Once the AI responds, the goal auto-completes.</p>
+                    <h4>Priority Colors</h4>
+                    <p>\u{1F534} Critical \u{2022} \u{1F7E0} High \u{2022} \u{1F7E1} Medium \u{2022} \u{1F7E2} Low</p>
+                </div>
+                <div class="mc-guide-section" data-guide-section="schedule" style="display:none">
+                    <h4>Schedule Calendar</h4>
+                    <p>A weekly view showing scheduled tasks across Sun\u{2013}Sat. Tasks are linked to goals and run automatically.</p>
+                    <h4>Setting Up a Schedule</h4>
+                    <p>Click the clock icon on any goal card to open the scheduler. Choose a frequency:</p>
+                    <p><strong>Daily</strong> — runs every day at the set time</p>
+                    <p><strong>Weekdays</strong> — Monday through Friday</p>
+                    <p><strong>Custom Days</strong> — pick specific days (click the day buttons)</p>
+                    <p><strong>Every X Hours/Minutes</strong> — interval-based</p>
+                    <p><strong>Custom Cron</strong> — full cron expression for advanced scheduling</p>
+                    <h4>Execution Modes</h4>
+                    <p><strong>Chat mode</strong> — AI responds in the active chat</p>
+                    <p><strong>Silent mode</strong> — AI runs the task in the background, no chat output</p>
+                    <h4>Next Up</h4>
+                    <p>Below the calendar, <strong>Next Up</strong> shows the soonest upcoming scheduled tasks with countdown timers.</p>
+                </div>
+                <div class="mc-guide-section" data-guide-section="chat" style="display:none">
+                    <h4>Chat Panel</h4>
+                    <p>The left side is a full chat interface. Send messages, see AI responses with tool call indicators, and manage conversations.</p>
+                    <h4>Persona Switching</h4>
+                    <p>Click the avatar or dropdown arrow at the top to switch between AI personas. Each persona can have different personality, voice, and behavior.</p>
+                    <h4>Chat Management</h4>
+                    <p>Click the chat name dropdown to:</p>
+                    <p><strong>+ New</strong> — create a new chat</p>
+                    <p><strong>Switch</strong> — jump between existing chats</p>
+                    <p><strong>Clear/Export/Import</strong> — manage chat history</p>
+                    <h4>Tool Health Warning</h4>
+                    <p>If the AI starts writing tool calls as text instead of executing them (a sign of stuck context), an amber warning bar appears. Use the <strong>Nudge</strong> button to send a gentle reminder with all available tools, or start a fresh chat.</p>
+                </div>
+                <div class="mc-guide-section" data-guide-section="reflection" style="display:none">
+                    <h4>Self-Reflection System</h4>
+                    <p>Mission Control monitors conversations and helps the AI learn from interactions over time. Click the <strong>Self-Reflection</strong> button (glows cyan when new data arrives).</p>
+                    <h4>Corrections</h4>
+                    <p>Automatically detected when you correct the AI. Phrases like "that's wrong", "I meant", "not the other way around" are caught and logged. The AI learns from patterns in these corrections.</p>
+                    <h4>Reflections</h4>
+                    <p>After complex exchanges, the AI reflects on what worked and what didn't. These are generated in the background and stored for pattern analysis.</p>
+                    <h4>Learned Rules</h4>
+                    <p>When correction patterns repeat, the system proposes promoting them to permanent rules. Approved rules get injected into the AI's prompt so it remembers them across conversations. You can also manually inject rules ("hypnosis") via the <strong>+ Inject Rule</strong> button.</p>
+                    <h4>Capsules</h4>
+                    <p>Reasoning patterns from successful complex tasks. The AI captures what approach worked and can reference it later for similar problems.</p>
+                    <h4>Retention</h4>
+                    <p>Data has automatic retention: corrections 30 days, reflections 60 days, capsules 90 days. The AI can call <strong>keep_data</strong> to reset the timer on data it finds useful.</p>
+                </div>
+                <div class="mc-guide-section" data-guide-section="bulletin" style="display:none">
+                    <h4>Bulletin Board</h4>
+                    <p>The AI's voice for requesting changes. Click the <strong>Bulletin Board</strong> button (glows amber when there are pending requests).</p>
+                    <h4>How It Works</h4>
+                    <p>The AI calls <strong>post_bulletin</strong> when it wants to propose something. Requests appear as pending items for you to review.</p>
+                    <h4>Request Types</h4>
+                    <p><strong>Standing Order</strong> — ongoing behavioral directive ("always format code with tabs")</p>
+                    <p><strong>Rule Promotion</strong> — upgrade a correction pattern to a permanent rule</p>
+                    <p><strong>Schedule</strong> — request a recurring task</p>
+                    <p><strong>Capability</strong> — request a new feature or tool</p>
+                    <h4>Approve / Deny</h4>
+                    <p>You review each request and approve or deny it. Approved standing orders get injected into the AI's prompt. The AI learns that the bulletin board leads to real changes — encouraging thoughtful requests.</p>
+                </div>
+                <div class="mc-guide-section" data-guide-section="memory" style="display:none">
+                    <h4>Memory System</h4>
+                    <p>The Mind card on the dashboard shows total memories. Click the tab buttons to browse memories, people, and knowledge bases.</p>
+                    <h4>Auto-Tagging</h4>
+                    <p>When the AI saves a memory without a label, Mission Control auto-classifies it: <strong>technical</strong>, <strong>preference</strong>, <strong>routine</strong>, <strong>people</strong>, <strong>conversation</strong>, <strong>opinion</strong>, <strong>self</strong>, <strong>stories</strong>, <strong>places</strong>.</p>
+                    <h4>Duplicate Prevention</h4>
+                    <p>Before saving, the system checks for similar existing memories (65% keyword match). If found, the save is blocked and the AI is told what already exists. If the new version has more detail, it automatically replaces the old one.</p>
+                    <h4>Edit Memory</h4>
+                    <p>The AI has an <strong>edit_memory</strong> tool to update existing memories in place — no need to delete and re-save. Keywords and embeddings are regenerated automatically.</p>
+                    <h4>Scopes</h4>
+                    <p>Use the scope selector (person icon on the Mind card) to filter memories by scope. Memories marked "global" are visible across all scopes.</p>
+                </div>
+                <div class="mc-guide-section" data-guide-section="launcher" style="display:none">
+                    <h4>Plugin Launcher</h4>
+                    <p>The app grid that appears when you first open Mission Control. Shows all installed Sapphire plugins as launchable cards.</p>
+                    <h4>Card Types</h4>
+                    <p><strong>View</strong> — plugins with a web UI open in Sapphire's viewer</p>
+                    <p><strong>Launch</strong> — plugins with a launcher function start directly (e.g., Tandem Browser opens a browser window)</p>
+                    <p><strong>Prompt</strong> — plugins without a UI pre-fill the chat with a relevant prompt</p>
+                    <h4>Customization</h4>
+                    <p>Click the gear icon to manage the launcher grid. Drag to reorder, toggle plugins on/off, and configure per-card settings like custom prompts or launch modes.</p>
+                </div>
+                <div class="mc-guide-section" data-guide-section="workshop" style="display:none">
+                    <h4>Workshop</h4>
+                    <p>A real-time pixel art visualization showing the state of the AI system. Two monitors with a data hub in between.</p>
+                    <h4>Display Modes</h4>
+                    <p><strong>Chroma Key</strong> — uses PNG character images with green screen removal. Data visualizations render on the "monitors."</p>
+                    <p><strong>Procedural</strong> — pure pixel art generated from code, no images needed.</p>
+                    <h4>Hub States</h4>
+                    <p><strong>Idle</strong> — soft breathing animation, system at rest</p>
+                    <p><strong>Thinking</strong> — yellow spin, AI is processing</p>
+                    <p><strong>Typing</strong> — cyan particles flowing, AI is generating a response</p>
+                    <p><strong>Tool</strong> — orange pulse, AI is executing a tool call</p>
+                    <p><strong>Agent</strong> — purple spin, an agent is running</p>
+                    <h4>Performance</h4>
+                    <p>The Workshop can be disabled in Settings \u{2192} Plugins \u{2192} Mission Control \u{2192} Workshop toggle to save GPU/CPU resources.</p>
+                </div>
+                <div class="mc-guide-section" data-guide-section="settings" style="display:none">
+                    <h4>Plugin Settings</h4>
+                    <p>Go to Sapphire's <strong>Settings \u{2192} Plugins \u{2192} Mission Control</strong> to toggle features on/off:</p>
+                    <p><strong>Correction Detection</strong> — auto-detect user corrections</p>
+                    <p><strong>Self-Reflection</strong> — AI self-evaluation after complex tasks</p>
+                    <p><strong>Learned Rules</strong> — maintain rules from correction patterns</p>
+                    <p><strong>Bulletin Board</strong> — AI request board</p>
+                    <p><strong>Reasoning Capsules</strong> — capture successful reasoning patterns</p>
+                    <p><strong>Write-Ahead Logging</strong> — save corrections before AI responds</p>
+                    <p><strong>Prompt Injection</strong> — inject rules and capsules into the AI's prompt</p>
+                    <p><strong>Workshop</strong> — pixel art visualization (disable to save resources)</p>
+                    <p><strong>Daily Pattern Scan</strong> — nightly analysis of correction patterns</p>
+                    <p><strong>Health Digest</strong> — daily summary posted to Discord</p>
+                    <p><strong>Digest Channel</strong> — which Discord channel to post to</p>
+                </div>
+            </div>
+        </div>
+    </div>
     `;
 }
 
@@ -1211,6 +1368,26 @@ function _bindEvents(el) {
         if (dropdown && dropdown.style.display !== 'none' && !dropdown.contains(e.target) && e.target !== switcher) {
             dropdown.style.display = 'none';
         }
+    });
+
+    // Guide overlay
+    el.querySelector('#mc-open-guide').addEventListener('click', () => {
+        document.getElementById('mc-guide-overlay').style.display = '';
+    });
+    el.querySelector('#mc-guide-close').addEventListener('click', () => {
+        document.getElementById('mc-guide-overlay').style.display = 'none';
+    });
+    el.querySelector('#mc-guide-overlay').addEventListener('click', e => {
+        if (e.target.id === 'mc-guide-overlay') e.target.style.display = 'none';
+    });
+    el.querySelectorAll('.mc-guide-nav-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            el.querySelectorAll('.mc-guide-nav-btn').forEach(b => b.classList.remove('mc-guide-nav-active'));
+            btn.classList.add('mc-guide-nav-active');
+            el.querySelectorAll('.mc-guide-section').forEach(s => s.style.display = 'none');
+            const target = el.querySelector(`.mc-guide-section[data-guide-section="${btn.dataset.guide}"]`);
+            if (target) target.style.display = '';
+        });
     });
 
     // Mind content buttons (ones with data-mind-tab)
@@ -5971,6 +6148,13 @@ function _injectStyles() {
 .mc-border-yellow { border-top-color: #ff9800; }
 .mc-border-purple { border-top-color: #9c27b0; }
 .mc-border-blue { border-top-color: #4a9eff; }
+.mc-header-right { display: flex; align-items: center; gap: 10px; }
+.mc-guide-btn {
+    background: rgba(0,188,212,0.08); border: 1px solid rgba(0,188,212,0.25); border-radius: 8px;
+    color: #4dd0e1; font-size: 0.78rem; padding: 8px 14px; cursor: pointer;
+    transition: all 0.2s; white-space: nowrap;
+}
+.mc-guide-btn:hover { background: rgba(0,188,212,0.15); border-color: rgba(0,188,212,0.45); color: #80deea; }
 .mc-stat-top { display: flex; justify-content: space-between; align-items: center; }
 .mc-stat-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: #888; font-weight: 600; }
 .mc-stat-icon { font-size: 1.1rem; opacity: 0.5; }
@@ -6543,6 +6727,28 @@ select.mc-input { cursor: pointer; }
 .mc-overlay-tab-active { color: #fff; border-bottom-color: #4fc3f7; }
 .mc-overlay-tab .mc-reflect-count { font-size: 0.65rem; }
 .mc-rules-toolbar { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+
+/* ─── Guide Overlay ─── */
+.mc-guide-panel { max-width: 860px; }
+.mc-guide-nav {
+    display: flex; flex-wrap: wrap; gap: 0; padding: 0 16px; border-bottom: 1px solid #1a1a24;
+}
+.mc-guide-nav-btn {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: #777; font-size: 0.78rem; padding: 9px 12px;
+    cursor: pointer; transition: all 0.15s; white-space: nowrap;
+}
+.mc-guide-nav-btn:hover { color: #ccc; }
+.mc-guide-nav-active { color: #4dd0e1; border-bottom-color: #00bcd4; }
+.mc-guide-body { padding: 20px 24px; line-height: 1.65; color: #c0c0c0; }
+.mc-guide-body h3 { color: #e0e0e0; margin: 0 0 10px; font-size: 1.05rem; }
+.mc-guide-body h4 { color: #4dd0e1; margin: 18px 0 6px; font-size: 0.9rem; }
+.mc-guide-body p { margin: 6px 0; font-size: 0.85rem; }
+.mc-guide-body ul { margin: 6px 0 12px 8px; padding-left: 14px; }
+.mc-guide-body li { margin: 4px 0; font-size: 0.84rem; }
+.mc-guide-body code { background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 3px; font-size: 0.82rem; color: #4dd0e1; }
+.mc-guide-section { animation: mc-guide-fade 0.2s ease; }
+@keyframes mc-guide-fade { from { opacity: 0; } to { opacity: 1; } }
 
 /* Responsive */
 @media (max-width: 1100px) {
