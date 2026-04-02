@@ -1282,7 +1282,7 @@ async function _onShowDashboard() {
 
     // Check workshop setting from plugin settings
     try {
-        const resp = await fetch('/api/plugins/mission-control/settings', { headers: { 'X-CSRF-Token': CSRF() } });
+        const resp = await fetch('/api/webui/plugins/mission-control/settings', { headers: { 'X-CSRF-Token': CSRF() } });
         if (resp.ok) {
             const settings = await resp.json();
             _workshopEnabled = settings.workshop !== false; // default true
