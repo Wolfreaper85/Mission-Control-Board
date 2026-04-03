@@ -265,56 +265,6 @@
                 "method": "GET",
                 "path": "reflection/stats",
                 "handler": "routes/dashboard.py:get_reflection_stats"
-            },
-            {
-                "method": "GET",
-                "path": "roundtable/personas",
-                "handler": "routes/roundtable.py:get_roundtable_personas"
-            },
-            {
-                "method": "GET",
-                "path": "roundtable/providers",
-                "handler": "routes/roundtable.py:get_providers"
-            },
-            {
-                "method": "GET",
-                "path": "roundtable/roles",
-                "handler": "routes/roundtable.py:get_roles"
-            },
-            {
-                "method": "GET",
-                "path": "roundtable/discussions",
-                "handler": "routes/roundtable.py:list_discussions"
-            },
-            {
-                "method": "POST",
-                "path": "roundtable/discussions/delete",
-                "handler": "routes/roundtable.py:delete_discussion"
-            },
-            {
-                "method": "POST",
-                "path": "roundtable/start",
-                "handler": "routes/roundtable.py:start_discussion"
-            },
-            {
-                "method": "POST",
-                "path": "roundtable/next-turn",
-                "handler": "routes/roundtable.py:next_turn"
-            },
-            {
-                "method": "POST",
-                "path": "roundtable/interject",
-                "handler": "routes/roundtable.py:user_interject"
-            },
-            {
-                "method": "POST",
-                "path": "roundtable/stop",
-                "handler": "routes/roundtable.py:stop_discussion"
-            },
-            {
-                "method": "GET",
-                "path": "roundtable/session",
-                "handler": "routes/roundtable.py:get_session_state"
             }
         ]
     }
