@@ -167,32 +167,44 @@ def run(event):
     # Get the Discord channel from settings or use default
     channel = settings.get("digest_channel", DEFAULT_CHANNEL)
 
-    # Send via Discord plugin's send_message
+    # Send via Discord daemon directly (bypasses scope_discord ContextVar
+    # which isn't set during scheduled tasks / cron runs)
     try:
-        import importlib.util
-        import sys
+        import asyncio
+        from plugins.discord.daemon import get_client, get_loop, list_connected
 
-        discord_tools_path = Path(__file__).parents[2] / "discord" / "tools" / "discord_tools.py"
-        if not discord_tools_path.exists():
-            # Try user plugins path
-            discord_tools_path = Path(__file__).parents[3] / "discord" / "tools" / "discord_tools.py"
+        connected = list_connected()
+        if not connected:
+            logger.error("Health digest: No Discord bots connected")
+            return "No Discord bots connected"
 
-        if not discord_tools_path.exists():
-            logger.error("Health digest: Discord plugin not found")
-            return "Discord plugin not found"
+        account = connected[0]  # Use first connected bot
+        client = get_client(account)
+        loop = get_loop()
 
-        spec = importlib.util.spec_from_file_location("_discord_tools", discord_tools_path)
-        discord_module = importlib.util.module_from_spec(spec)
-        sys.modules["_discord_tools"] = discord_module
-        spec.loader.exec_module(discord_module)
+        if not client or not loop:
+            logger.error(f"Health digest: Discord bot '{account}' not ready")
+            return f"Discord bot '{account}' not ready"
 
-        # Call discord_send_message
-        result = discord_module.execute("discord_send_message", {
-            "channel": channel,
-            "text": digest
-        }, None)
+        # Resolve channel by name
+        target_channel = None
+        for guild in client.guilds:
+            for ch in guild.text_channels:
+                if ch.name == channel:
+                    target_channel = ch
+                    break
+            if target_channel:
+                break
 
-        logger.info(f"Health digest sent to #{channel}")
+        if not target_channel:
+            logger.error(f"Health digest: Channel '#{channel}' not found")
+            return f"Channel '#{channel}' not found"
+
+        # Send the message
+        future = asyncio.run_coroutine_threadsafe(target_channel.send(digest), loop)
+        future.result(timeout=15)
+
+        logger.info(f"Health digest sent to #{channel} via {account}")
         return f"Digest sent to #{channel} ({len(digest)} chars)"
 
     except Exception as e:
