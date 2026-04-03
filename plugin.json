@@ -282,6 +282,16 @@
                 "handler": "routes/roundtable.py:get_roles"
             },
             {
+                "method": "GET",
+                "path": "roundtable/discussions",
+                "handler": "routes/roundtable.py:list_discussions"
+            },
+            {
+                "method": "POST",
+                "path": "roundtable/discussions/delete",
+                "handler": "routes/roundtable.py:delete_discussion"
+            },
+            {
                 "method": "POST",
                 "path": "roundtable/start",
                 "handler": "routes/roundtable.py:start_discussion"

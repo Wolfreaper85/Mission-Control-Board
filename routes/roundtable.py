@@ -2,16 +2,20 @@
 # Round Table — multi-persona discussion orchestration
 # Lightweight mode: no hooks, no memory saves, no tool calling.
 # Each persona's turn is a single LLM call with their system prompt + shared transcript.
+# Sessions persist to SQLite so discussions survive restarts.
 
+import json
 import logging
+import sqlite3
 import uuid
 from datetime import datetime
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# ─── In-memory session storage ──────────────────────────────────────────────
+# ─── Session storage (SQLite + in-memory active session) ────────────────────
 
-_sessions = {}  # session_id -> session dict
+_active = {}  # session_id -> live session dict (for active discussions)
 
 ROLE_DESCRIPTIONS = {
     "Leader": "Guide the discussion, synthesize points, and keep things on track. Make final calls when the group is divided.",
@@ -25,15 +29,127 @@ ROLE_DESCRIPTIONS = {
 }
 
 
+def _find_db():
+    """Find or create roundtable.db in the user directory."""
+    for i in range(6):
+        candidate = Path(__file__).parents[i] / "user"
+        if candidate.exists():
+            return candidate / "roundtable.db"
+    return Path(__file__).parent.parent.parent.parent / "user" / "roundtable.db"
+
+
+def _get_conn():
+    """Get a SQLite connection with WAL mode."""
+    db_path = _find_db()
+    conn = sqlite3.connect(str(db_path), timeout=5)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
+
+
+_tables_created = False
+
+def _ensure_tables():
+    """Create tables if needed. Idempotent."""
+    global _tables_created
+    if _tables_created:
+        return
+    try:
+        conn = _get_conn()
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS discussions (
+                id TEXT PRIMARY KEY,
+                topic TEXT NOT NULL,
+                roster TEXT NOT NULL,
+                transcript TEXT NOT NULL DEFAULT '[]',
+                current_round INTEGER DEFAULT 1,
+                current_turn_index INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'active',
+                llm_mode TEXT DEFAULT 'per_persona',
+                force_provider TEXT DEFAULT '',
+                force_model TEXT DEFAULT '',
+                created_at TEXT,
+                updated_at TEXT
+            )
+        ''')
+        conn.commit()
+        conn.close()
+        _tables_created = True
+    except Exception as e:
+        logger.error(f"Round Table DB init error: {e}")
+
+
+def _save_session(session):
+    """Persist session to SQLite."""
+    _ensure_tables()
+    try:
+        conn = _get_conn()
+        conn.execute('''
+            INSERT OR REPLACE INTO discussions
+            (id, topic, roster, transcript, current_round, current_turn_index,
+             status, llm_mode, force_provider, force_model, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            session["id"], session["topic"],
+            json.dumps(session["roster"]), json.dumps(session["transcript"]),
+            session["current_round"], session["current_turn_index"],
+            session["status"], session.get("llm_mode", "per_persona"),
+            session.get("force_provider", ""), session.get("force_model", ""),
+            session.get("created_at", datetime.now().isoformat()),
+            datetime.now().isoformat()
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Round Table save error: {e}")
+
+
+def _load_session(session_id):
+    """Load a session from SQLite into memory."""
+    _ensure_tables()
+    try:
+        conn = _get_conn()
+        row = conn.execute("SELECT * FROM discussions WHERE id = ?", (session_id,)).fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "topic": row["topic"],
+            "roster": json.loads(row["roster"]),
+            "transcript": json.loads(row["transcript"]),
+            "current_round": row["current_round"],
+            "current_turn_index": row["current_turn_index"],
+            "status": row["status"],
+            "llm_mode": row["llm_mode"] or "per_persona",
+            "force_provider": row["force_provider"] or "",
+            "force_model": row["force_model"] or "",
+            "created_at": row["created_at"],
+        }
+    except Exception as e:
+        logger.error(f"Round Table load error: {e}")
+        return None
+
+
+def _get_session(session_id):
+    """Get session from active cache or load from DB."""
+    if session_id in _active:
+        return _active[session_id]
+    session = _load_session(session_id)
+    if session:
+        _active[session_id] = session
+    return session
+
+
+# ─── Helpers ────────────────────────────────────────────────────────────────
+
 def _get_role_description(role):
-    """Get a description for a role, supporting custom roles."""
     if role in ROLE_DESCRIPTIONS:
         return ROLE_DESCRIPTIONS[role]
     return f"Contribute to the discussion from your unique perspective as {role}."
 
 
 def _format_transcript(transcript):
-    """Format the full transcript as [Name (Role)]: message lines."""
     lines = []
     for entry in transcript:
         name = entry.get("persona", "User")
@@ -47,7 +163,6 @@ def _format_transcript(transcript):
 
 
 def _resolve_provider(provider_key, model_override=""):
-    """Resolve an LLM provider instance from a key. Returns (provider, effective_model, gen_params) or raises."""
     import config as app_config
     from core.chat.llm_providers import get_provider_by_key, get_first_available_provider, get_generation_params
 
@@ -84,7 +199,6 @@ def _resolve_provider(provider_key, model_override=""):
 
 
 def _load_persona_prompt(persona_settings):
-    """Load the system prompt content for a persona."""
     prompt_name = persona_settings.get("prompt", "sapphire")
     try:
         from core import prompts
@@ -96,7 +210,6 @@ def _load_persona_prompt(persona_settings):
     except Exception:
         content = "You are a helpful assistant."
 
-    # Apply name substitutions
     try:
         import config as app_config
         username = getattr(app_config, 'DEFAULT_USERNAME', 'Human')
@@ -155,21 +268,70 @@ async def get_providers(**kwargs):
         return {"providers": [], "error": str(e)}
 
 
+async def list_discussions(**kwargs):
+    """List all saved discussions, newest first."""
+    _ensure_tables()
+    try:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT id, topic, status, current_round, created_at, updated_at, roster, transcript "
+            "FROM discussions ORDER BY updated_at DESC LIMIT 50"
+        ).fetchall()
+        conn.close()
+        result = []
+        for r in rows:
+            roster = json.loads(r["roster"]) if r["roster"] else []
+            transcript = json.loads(r["transcript"]) if r["transcript"] else []
+            result.append({
+                "id": r["id"],
+                "topic": r["topic"],
+                "status": r["status"],
+                "current_round": r["current_round"],
+                "persona_count": len(roster),
+                "message_count": len(transcript),
+                "personas": [p.get("name", "") for p in roster[:5]],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            })
+        return {"discussions": result}
+    except Exception as e:
+        logger.error(f"list_discussions error: {e}")
+        return {"discussions": [], "error": str(e)}
+
+
+async def delete_discussion(**kwargs):
+    """Delete a saved discussion."""
+    body = kwargs.get("body", {})
+    session_id = body.get("session_id", "")
+    if not session_id:
+        return {"error": "session_id is required"}
+    _ensure_tables()
+    try:
+        conn = _get_conn()
+        conn.execute("DELETE FROM discussions WHERE id = ?", (session_id,))
+        conn.commit()
+        conn.close()
+        _active.pop(session_id, None)
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"delete_discussion error: {e}")
+        return {"error": str(e)}
+
+
 async def start_discussion(**kwargs):
     """Create a new round table session."""
     body = kwargs.get("body", {})
     topic = body.get("topic", "").strip()
-    roster = body.get("roster", [])  # [{name, role, order}]
-    llm_mode = body.get("llm_mode", "per_persona")  # "per_persona" or "single"
-    force_provider = body.get("force_provider", "")  # provider key for single mode
-    force_model = body.get("force_model", "")  # model for single mode
+    roster = body.get("roster", [])
+    llm_mode = body.get("llm_mode", "per_persona")
+    force_provider = body.get("force_provider", "")
+    force_model = body.get("force_model", "")
 
     if not topic:
         return {"error": "Topic is required"}
     if len(roster) < 2:
         return {"error": "At least 2 personas are required"}
 
-    # Sort roster by order
     roster = sorted(roster, key=lambda r: r.get("order", 0))
 
     session_id = str(uuid.uuid4())[:8]
@@ -186,7 +348,8 @@ async def start_discussion(**kwargs):
         "force_model": force_model,
         "created_at": datetime.now().isoformat(),
     }
-    _sessions[session_id] = session
+    _active[session_id] = session
+    _save_session(session)
 
     logger.info(f"Round Table started: {session_id} | topic='{topic}' | {len(roster)} personas | mode={llm_mode}")
     return {"session_id": session_id, "roster": roster, "topic": topic}
@@ -197,7 +360,7 @@ async def next_turn(**kwargs):
     body = kwargs.get("body", {})
     session_id = body.get("session_id", "")
 
-    session = _sessions.get(session_id)
+    session = _get_session(session_id)
     if not session:
         return {"error": "Session not found"}
     if session["status"] != "active":
@@ -206,7 +369,6 @@ async def next_turn(**kwargs):
     roster = session["roster"]
     turn_idx = session["current_turn_index"]
 
-    # Check if round is complete
     if turn_idx >= len(roster):
         session["current_round"] += 1
         session["current_turn_index"] = 0
@@ -217,18 +379,14 @@ async def next_turn(**kwargs):
     persona_role = persona_entry.get("role", "Participant")
 
     try:
-        # Load persona data
         from core.personas.persona_manager import persona_manager
         persona_data = persona_manager.get(persona_name)
         if not persona_data:
             return {"error": f"Persona '{persona_name}' not found"}
 
         persona_settings = persona_data.get("settings", {})
-
-        # Build system prompt
         system_prompt = _load_persona_prompt(persona_settings)
 
-        # Add role injection
         role_desc = _get_role_description(persona_role)
         role_injection = (
             f"\n\n[Round Table Discussion]\n"
@@ -239,7 +397,6 @@ async def next_turn(**kwargs):
         )
         full_system = system_prompt + role_injection
 
-        # Build user message with transcript
         transcript_text = _format_transcript(session["transcript"]) if session["transcript"] else "(No discussion yet — you speak first.)"
 
         user_message = (
@@ -253,7 +410,6 @@ async def next_turn(**kwargs):
             {"role": "user", "content": user_message}
         ]
 
-        # Resolve LLM provider
         if session["llm_mode"] == "single" and session["force_provider"]:
             provider_key = session["force_provider"]
             model_override = session.get("force_model", "")
@@ -263,17 +419,14 @@ async def next_turn(**kwargs):
 
         provider, effective_model, gen_params = _resolve_provider(provider_key, model_override)
 
-        # Make the LLM call — no tools, no streaming
         response = provider.chat_completion(messages, tools=None, generation_params=gen_params)
         content = response.content or "(No response)"
 
-        # Strip thinking tags if present
         import re
         content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
         if not content:
             content = "(No response)"
 
-        # Append to transcript
         entry = {
             "persona": persona_name,
             "role": persona_role,
@@ -284,10 +437,11 @@ async def next_turn(**kwargs):
             "avatar": persona_data.get("avatar"),
         }
         session["transcript"].append(entry)
-
-        # Advance turn
         session["current_turn_index"] = turn_idx + 1
         has_more = (turn_idx + 1) < len(roster)
+
+        # Auto-save after each turn
+        _save_session(session)
 
         logger.info(f"Round Table [{session_id}] R{session['current_round']} | {persona_name} ({persona_role}) spoke | {len(content)} chars")
 
@@ -313,7 +467,7 @@ async def user_interject(**kwargs):
     session_id = body.get("session_id", "")
     message = body.get("message", "").strip()
 
-    session = _sessions.get(session_id)
+    session = _get_session(session_id)
     if not session:
         return {"error": "Session not found"}
     if not message:
@@ -329,37 +483,36 @@ async def user_interject(**kwargs):
         "avatar": None,
     }
     session["transcript"].append(entry)
-
-    # Reset turn index to start of roster for next round of responses
     session["current_round"] += 1
     session["current_turn_index"] = 0
 
+    _save_session(session)
     return {"entry": entry, "round": session["current_round"]}
 
 
 async def stop_discussion(**kwargs):
-    """Stop and clean up a discussion session."""
+    """Stop a discussion session."""
     body = kwargs.get("body", {})
     session_id = body.get("session_id", "")
 
-    session = _sessions.get(session_id)
+    session = _get_session(session_id)
     if not session:
         return {"error": "Session not found"}
 
     session["status"] = "complete"
-    transcript = session["transcript"]
+    _save_session(session)
+    _active.pop(session_id, None)
 
-    # Clean up after returning
-    logger.info(f"Round Table [{session_id}] stopped | {len(transcript)} messages")
-    return {"success": True, "total_messages": len(transcript)}
+    logger.info(f"Round Table [{session_id}] stopped | {len(session['transcript'])} messages")
+    return {"success": True, "total_messages": len(session["transcript"])}
 
 
 async def get_session_state(**kwargs):
-    """Get full session state (for reconnection)."""
+    """Get full session state (for loading a saved discussion)."""
     query = kwargs.get("query", {})
     session_id = query.get("session_id", "")
 
-    session = _sessions.get(session_id)
+    session = _get_session(session_id)
     if not session:
         return {"error": "Session not found"}
 
@@ -371,7 +524,7 @@ async def get_session_state(**kwargs):
         "current_round": session["current_round"],
         "current_turn_index": session["current_turn_index"],
         "status": session["status"],
-        "llm_mode": session["llm_mode"],
+        "llm_mode": session.get("llm_mode", "per_persona"),
     }
 
 

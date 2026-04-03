@@ -5525,6 +5525,10 @@ function _buildRoundTableLayout() {
         <header class="rt-header">
             <button class="mc-back-btn" id="rt-back" title="Back to Mission Control">\u{2B05}\u{FE0F}</button>
             <h1 class="rt-title">\u{2694}\u{FE0F} Round Table</h1>
+            <div class="rt-history-group">
+                <button class="rt-btn rt-btn-history" id="rt-history-btn" title="Past discussions">\u{1F4DA} History</button>
+                <button class="rt-btn rt-btn-new" id="rt-new-btn" title="New discussion">\u{2795} New</button>
+            </div>
             <div class="rt-llm-mode">
                 <label class="rt-mode-label">
                     <input type="radio" name="rt-llm-mode" value="per_persona" checked> Per-Persona LLM
@@ -5566,6 +5570,15 @@ function _buildRoundTableLayout() {
                 </div>
             </div>
         </div>
+
+        <!-- History Panel -->
+        <div class="rt-history-panel" id="rt-history-panel" style="display:none">
+            <div class="rt-history-header">
+                <h3>\u{1F4DA} Discussion History</h3>
+                <button class="mc-overlay-close" id="rt-history-close">\u{2715}</button>
+            </div>
+            <div class="rt-history-list" id="rt-history-list"></div>
+        </div>
     `;
 }
 
@@ -5582,6 +5595,13 @@ function _bindRoundTableEvents(el) {
             single.style.display = radio.value === 'single' && radio.checked ? '' : 'none';
         });
     });
+
+    // History & New
+    el.querySelector('#rt-history-btn').addEventListener('click', () => _rtToggleHistory());
+    el.querySelector('#rt-history-close').addEventListener('click', () => {
+        document.getElementById('rt-history-panel').style.display = 'none';
+    });
+    el.querySelector('#rt-new-btn').addEventListener('click', () => _rtNewDiscussion());
 
     // Discussion controls
     el.querySelector('#rt-start').addEventListener('click', () => _rtStartDiscussion());
@@ -5973,6 +5993,153 @@ function _rtUpdateControls() {
     if (next) next.style.display = active && !running && !_rtPaused ? '' : 'none';
     if (stop) stop.style.display = active ? '' : 'none';
     if (topic) topic.disabled = active;
+}
+
+async function _rtToggleHistory() {
+    const panel = document.getElementById('rt-history-panel');
+    if (!panel) return;
+    if (panel.style.display !== 'none') {
+        panel.style.display = 'none';
+        return;
+    }
+    panel.style.display = '';
+    await _rtLoadHistory();
+}
+
+async function _rtLoadHistory() {
+    const list = document.getElementById('rt-history-list');
+    if (!list) return;
+    list.innerHTML = '<div class="rt-loading">Loading...</div>';
+    try {
+        const resp = await fetch('/api/plugin/mission-control/roundtable/discussions', {
+            headers: { 'X-CSRF-Token': CSRF() }
+        });
+        const data = await resp.json();
+        const discussions = data.discussions || [];
+        if (discussions.length === 0) {
+            list.innerHTML = '<div class="rt-pool-empty">No saved discussions yet.</div>';
+            return;
+        }
+        list.innerHTML = discussions.map(d => {
+            const date = d.updated_at ? new Date(d.updated_at).toLocaleDateString() : '';
+            const statusIcon = d.status === 'active' ? '\u{1F7E2}' : '\u{26AA}';
+            return `
+                <div class="rt-history-card" data-id="${d.id}">
+                    <div class="rt-history-info">
+                        <span class="rt-history-status">${statusIcon}</span>
+                        <div class="rt-history-details">
+                            <div class="rt-history-topic">${_escHtml(d.topic)}</div>
+                            <div class="rt-history-meta">${d.personas.join(', ')} \u{2022} ${d.message_count} msgs \u{2022} R${d.current_round} \u{2022} ${date}</div>
+                        </div>
+                    </div>
+                    <div class="rt-history-actions">
+                        <button class="rt-btn rt-history-load" data-id="${d.id}" title="Load">\u{1F4C2}</button>
+                        <button class="rt-btn rt-history-del" data-id="${d.id}" title="Delete">\u{1F5D1}\u{FE0F}</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        // Bind load/delete
+        list.querySelectorAll('.rt-history-load').forEach(btn => {
+            btn.addEventListener('click', () => _rtLoadDiscussion(btn.dataset.id));
+        });
+        list.querySelectorAll('.rt-history-del').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (!confirm('Delete this discussion?')) return;
+                await fetch('/api/plugin/mission-control/roundtable/discussions/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                    body: JSON.stringify({ session_id: btn.dataset.id })
+                });
+                _rtLoadHistory();
+            });
+        });
+    } catch (e) {
+        list.innerHTML = '<div class="rt-pool-empty">Failed to load history.</div>';
+        console.error('[RT] History error:', e);
+    }
+}
+
+async function _rtLoadDiscussion(sessionId) {
+    try {
+        const resp = await fetch(`/api/plugin/mission-control/roundtable/session?session_id=${sessionId}`, {
+            headers: { 'X-CSRF-Token': CSRF() }
+        });
+        const data = await resp.json();
+        if (data.error) { alert(data.error); return; }
+
+        // Restore session state
+        _rtSession = data.session_id;
+        _rtRunning = false;
+        _rtPaused = false;
+
+        // Restore topic
+        const topicEl = document.getElementById('rt-topic');
+        if (topicEl) topicEl.value = data.topic;
+
+        // Restore roster
+        _rtRoster = (data.roster || []).map((r, i) => {
+            const p = _rtAllPersonas.find(pp => pp.name === r.name);
+            return {
+                name: r.name, role: r.role || 'Participant', order: i,
+                trim_color: p ? p.trim_color : '#4a9eff',
+                avatar: p ? p.avatar : null,
+            };
+        });
+        _rtRenderRoster();
+        _rtRenderPool();
+
+        // Restore transcript
+        const transcript = document.getElementById('rt-transcript');
+        if (transcript) {
+            transcript.innerHTML = '';
+            for (const entry of (data.transcript || [])) {
+                _rtAppendMessage(entry);
+            }
+        }
+
+        // Restore LLM mode
+        const modeRadio = document.querySelector(`input[name="rt-llm-mode"][value="${data.llm_mode || 'per_persona'}"]`);
+        if (modeRadio) { modeRadio.checked = true; modeRadio.dispatchEvent(new Event('change')); }
+
+        // Update controls — can resume if status is active
+        if (data.status === 'active') {
+            _rtUpdateControls();
+        } else {
+            _rtSession = data.session_id;
+            _rtUpdateControls();
+        }
+
+        // Close history panel
+        document.getElementById('rt-history-panel').style.display = 'none';
+
+        _rtAppendSystem(`Loaded discussion: "${data.topic}" (Round ${data.current_round})`);
+    } catch (e) {
+        console.error('[RT] Load discussion error:', e);
+        alert('Failed to load discussion.');
+    }
+}
+
+function _rtNewDiscussion() {
+    if (_rtSession && _rtRunning) {
+        if (!confirm('End current discussion and start fresh?')) return;
+        _rtStop();
+    }
+    _rtSession = null;
+    _rtRunning = false;
+    _rtPaused = false;
+    _rtRoster = [];
+
+    const topicEl = document.getElementById('rt-topic');
+    if (topicEl) { topicEl.value = ''; topicEl.disabled = false; }
+
+    const transcript = document.getElementById('rt-transcript');
+    if (transcript) transcript.innerHTML = '<div class="rt-transcript-empty">\u{2694}\u{FE0F} Set a topic, add personas to the roster, and start the discussion.</div>';
+
+    _rtRenderRoster();
+    _rtRenderPool();
+    _rtUpdateControls();
 }
 
 
@@ -7271,6 +7438,7 @@ select.mc-input { cursor: pointer; }
 .rt-root {
     display: flex; flex-direction: column; height: 100vh;
     background: #06060a; color: #e0e0e0; font-family: inherit;
+    position: relative;
 }
 .rt-header {
     display: flex; align-items: center; gap: 16px;
@@ -7449,6 +7617,37 @@ select.mc-input { cursor: pointer; }
     background: linear-gradient(135deg, rgba(74,158,255,0.15), rgba(255,152,0,0.15));
     border-color: rgba(74,158,255,0.4);
 }
+
+/* History panel */
+.rt-history-group { display: flex; gap: 6px; }
+.rt-history-panel {
+    position: absolute; top: 60px; right: 24px; z-index: 100;
+    width: 420px; max-height: 70vh; background: #0a0a12;
+    border: 1px solid #1e1e2e; border-radius: 12px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.6); overflow: hidden;
+    display: flex; flex-direction: column;
+    animation: rt-fade-in 0.2s ease;
+}
+.rt-history-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border-bottom: 1px solid #1a1a24;
+}
+.rt-history-header h3 { margin: 0; font-size: 0.95rem; color: #e0e0e0; }
+.rt-history-list { overflow-y: auto; padding: 8px; flex: 1; }
+.rt-history-card {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 12px; border-radius: 8px; margin-bottom: 4px;
+    background: #0d0d14; transition: background 0.15s; cursor: default;
+}
+.rt-history-card:hover { background: #15151f; }
+.rt-history-info { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.rt-history-status { font-size: 0.7rem; flex-shrink: 0; }
+.rt-history-details { min-width: 0; }
+.rt-history-topic { font-size: 0.82rem; font-weight: 600; color: #ddd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rt-history-meta { font-size: 0.7rem; color: #888; margin-top: 2px; }
+.rt-history-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.rt-history-actions .rt-btn { padding: 4px 8px; font-size: 0.8rem; }
+.rt-loading { color: #888; text-align: center; padding: 20px; font-size: 0.85rem; }
 
 /* Round Table responsive */
 @media (max-width: 800px) {
