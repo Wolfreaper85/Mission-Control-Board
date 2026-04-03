@@ -106,7 +106,7 @@
                 "key": "digest_channel",
                 "type": "string",
                 "label": "Digest Discord Channel",
-                "default": "ai-updates",
+                "default": "lexi-updates-for-wolf",
                 "help": "Discord channel name for health digest posts"
             }
         ],
