@@ -21,6 +21,11 @@ export default {
             show: () => _onShowDashboard(),
             hide: () => _onHideDashboard(),
         });
+        registerView('round-table', {
+            init: (el) => _initRoundTable(el),
+            show: () => {},
+            hide: () => {},
+        });
     }
 };
 
@@ -65,6 +70,13 @@ function _createViewContainers() {
     mcDiv.className = 'view';
     mcDiv.style.display = 'none';
     app.appendChild(mcDiv);
+
+    // Round Table view
+    const rtDiv = document.createElement('div');
+    rtDiv.id = 'view-round-table';
+    rtDiv.className = 'view';
+    rtDiv.style.display = 'none';
+    app.appendChild(rtDiv);
 }
 
 // ─── State ──────────────────────────────────────────────────────────────────
@@ -117,6 +129,15 @@ let _offUser = null, _offAI = null; // offscreen canvases (629×1024, matching i
 const _GW = 320, _GH = 520;        // game resolution for procedural mode
 let _pixelStyle = localStorage.getItem('mc-pixel-style') || 'chroma';
 let _workshopEnabled = true; // controlled by plugin settings, fetched on dashboard show
+
+// Round Table state
+let _rtContainer = null;
+let _rtSession = null;       // session ID
+let _rtRoster = [];          // [{name, role, order, trim_color, avatar}]
+let _rtAllPersonas = [];     // all available personas
+let _rtRunning = false;      // auto-advancing turns
+let _rtPaused = false;
+let _rtDragItem = null;      // currently dragged roster item
 
 // ─── Launcher init ───────────────────────────────────────────────────────────
 
@@ -663,6 +684,10 @@ function _buildLayout() {
                 <button class="mc-reflect-btn mc-reflect-btn-brain" id="mc-open-reflection">
                     <span class="mc-reflect-btn-icon">\u{1F9E0}</span>
                     <span class="mc-reflect-btn-label">Self-Reflection</span>
+                </button>
+                <button class="mc-reflect-btn mc-reflect-btn-roundtable" id="mc-open-roundtable">
+                    <span class="mc-reflect-btn-icon">\u{2694}\u{FE0F}</span>
+                    <span class="mc-reflect-btn-label">Round Table</span>
                 </button>
             </div>
 
@@ -1370,6 +1395,9 @@ function _bindEvents(el) {
             dropdown.style.display = 'none';
         }
     });
+
+    // Round Table button
+    el.querySelector('#mc-open-roundtable').addEventListener('click', () => switchView('round-table'));
 
     // Guide overlay
     el.querySelector('#mc-open-guide').addEventListener('click', () => {
@@ -5481,6 +5509,473 @@ function _countProgressNotes(goals) {
     return goals.reduce((sum, g) => sum + (g.progress ? g.progress.length : 0), 0);
 }
 
+// ─── Round Table ────────────────────────────────────────────────────────────
+
+function _initRoundTable(el) {
+    _rtContainer = el;
+    _injectStyles();
+    el.innerHTML = `<div class="rt-root">${_buildRoundTableLayout()}</div>`;
+    _bindRoundTableEvents(el);
+    _loadRoundTablePersonas();
+    _loadRoundTableProviders();
+}
+
+function _buildRoundTableLayout() {
+    return `
+        <header class="rt-header">
+            <button class="mc-back-btn" id="rt-back" title="Back to Mission Control">\u{2B05}\u{FE0F}</button>
+            <h1 class="rt-title">\u{2694}\u{FE0F} Round Table</h1>
+            <div class="rt-llm-mode">
+                <label class="rt-mode-label">
+                    <input type="radio" name="rt-llm-mode" value="per_persona" checked> Per-Persona LLM
+                </label>
+                <label class="rt-mode-label">
+                    <input type="radio" name="rt-llm-mode" value="single"> Single LLM
+                </label>
+                <div class="rt-single-options" id="rt-single-options" style="display:none">
+                    <select id="rt-provider-select"><option value="auto">Auto</option></select>
+                </div>
+            </div>
+        </header>
+
+        <div class="rt-topic-bar">
+            <input type="text" class="rt-topic-input" id="rt-topic" placeholder="Enter a discussion topic..." maxlength="500">
+            <button class="rt-btn rt-btn-start" id="rt-start">\u{25B6} Start</button>
+            <button class="rt-btn rt-btn-pause" id="rt-pause" style="display:none">\u{23F8} Pause</button>
+            <button class="rt-btn rt-btn-resume" id="rt-resume" style="display:none">\u{25B6} Resume</button>
+            <button class="rt-btn rt-btn-next" id="rt-next-round" style="display:none">\u{27A1}\u{FE0F} Next Round</button>
+            <button class="rt-btn rt-btn-stop" id="rt-stop" style="display:none">\u{23F9} End</button>
+        </div>
+
+        <div class="rt-body">
+            <div class="rt-roster-panel">
+                <h3 class="rt-roster-title">\u{1F465} Roster <span class="rt-roster-count" id="rt-roster-count">0</span></h3>
+                <div class="rt-roster-list" id="rt-roster-list">
+                    <div class="rt-empty-roster">Drag personas here to add them</div>
+                </div>
+                <div class="rt-persona-pool-title">\u{1F4CB} Available Personas</div>
+                <div class="rt-persona-pool" id="rt-persona-pool"></div>
+            </div>
+            <div class="rt-transcript-panel">
+                <div class="rt-transcript" id="rt-transcript">
+                    <div class="rt-transcript-empty">\u{2694}\u{FE0F} Set a topic, add personas to the roster, and start the discussion.</div>
+                </div>
+                <div class="rt-interject-bar">
+                    <textarea class="rt-interject-input" id="rt-interject-input" placeholder="Interject in the discussion..." rows="1"></textarea>
+                    <button class="rt-btn rt-btn-send" id="rt-interject-send" title="Send">\u{27A4}</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function _bindRoundTableEvents(el) {
+    el.querySelector('#rt-back').addEventListener('click', () => {
+        if (_rtRunning) { _rtRunning = false; _rtPaused = false; }
+        switchView('mission-control');
+    });
+
+    // LLM mode toggle
+    el.querySelectorAll('input[name="rt-llm-mode"]').forEach(radio => {
+        radio.addEventListener('change', () => {
+            const single = el.querySelector('#rt-single-options');
+            single.style.display = radio.value === 'single' && radio.checked ? '' : 'none';
+        });
+    });
+
+    // Discussion controls
+    el.querySelector('#rt-start').addEventListener('click', () => _rtStartDiscussion());
+    el.querySelector('#rt-pause').addEventListener('click', () => _rtPause());
+    el.querySelector('#rt-resume').addEventListener('click', () => _rtResume());
+    el.querySelector('#rt-next-round').addEventListener('click', () => _rtNextRound());
+    el.querySelector('#rt-stop').addEventListener('click', () => _rtStop());
+
+    // Interject
+    el.querySelector('#rt-interject-send').addEventListener('click', () => _rtInterject());
+    el.querySelector('#rt-interject-input').addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _rtInterject(); }
+    });
+
+    // Roster drop zone
+    const rosterList = el.querySelector('#rt-roster-list');
+    rosterList.addEventListener('dragover', e => { e.preventDefault(); rosterList.classList.add('rt-drop-hover'); });
+    rosterList.addEventListener('dragleave', () => rosterList.classList.remove('rt-drop-hover'));
+    rosterList.addEventListener('drop', e => {
+        e.preventDefault();
+        rosterList.classList.remove('rt-drop-hover');
+        const name = e.dataTransfer.getData('text/plain');
+        if (name && !_rtRoster.find(r => r.name === name)) {
+            const p = _rtAllPersonas.find(pp => pp.name === name);
+            if (p) {
+                _rtRoster.push({
+                    name: p.name, role: 'Participant', order: _rtRoster.length,
+                    trim_color: p.trim_color, avatar: p.avatar
+                });
+                _rtRenderRoster();
+                _rtRenderPool();
+            }
+        }
+    });
+}
+
+async function _loadRoundTablePersonas() {
+    try {
+        const resp = await fetch('/api/plugin/mission-control/roundtable/personas', {
+            headers: { 'X-CSRF-Token': CSRF() }
+        });
+        const data = await resp.json();
+        _rtAllPersonas = data.personas || [];
+        _rtRenderPool();
+    } catch (e) { console.error('[RT] Failed to load personas:', e); }
+}
+
+async function _loadRoundTableProviders() {
+    try {
+        const resp = await fetch('/api/plugin/mission-control/roundtable/providers', {
+            headers: { 'X-CSRF-Token': CSRF() }
+        });
+        const data = await resp.json();
+        const select = document.getElementById('rt-provider-select');
+        if (!select) return;
+        select.innerHTML = '<option value="auto">Auto (first available)</option>';
+        for (const p of (data.providers || [])) {
+            const opt = document.createElement('option');
+            opt.value = p.key;
+            opt.textContent = `${p.name} — ${p.model || 'default'}`;
+            select.appendChild(opt);
+        }
+    } catch (e) { console.error('[RT] Failed to load providers:', e); }
+}
+
+function _rtRenderPool() {
+    const pool = document.getElementById('rt-persona-pool');
+    if (!pool) return;
+    const inRoster = new Set(_rtRoster.map(r => r.name));
+    const available = _rtAllPersonas.filter(p => !inRoster.has(p.name));
+    if (available.length === 0) {
+        pool.innerHTML = '<div class="rt-pool-empty">All personas added</div>';
+        return;
+    }
+    pool.innerHTML = available.map(p => `
+        <div class="rt-persona-chip" draggable="true" data-name="${p.name}"
+             style="border-color:${p.trim_color || '#4a9eff'}">
+            <img class="rt-chip-avatar" src="/api/personas/${p.name}/avatar"
+                 onerror="this.style.display='none'" style="border-color:${p.trim_color || '#4a9eff'}">
+            <span class="rt-chip-name">${p.name}</span>
+        </div>
+    `).join('');
+    pool.querySelectorAll('.rt-persona-chip').forEach(chip => {
+        chip.addEventListener('dragstart', e => {
+            e.dataTransfer.setData('text/plain', chip.dataset.name);
+            chip.classList.add('rt-dragging');
+        });
+        chip.addEventListener('dragend', () => chip.classList.remove('rt-dragging'));
+        // Click to add too
+        chip.addEventListener('click', () => {
+            const name = chip.dataset.name;
+            if (!_rtRoster.find(r => r.name === name)) {
+                const p = _rtAllPersonas.find(pp => pp.name === name);
+                if (p) {
+                    _rtRoster.push({
+                        name: p.name, role: 'Participant', order: _rtRoster.length,
+                        trim_color: p.trim_color, avatar: p.avatar
+                    });
+                    _rtRenderRoster();
+                    _rtRenderPool();
+                }
+            }
+        });
+    });
+}
+
+function _rtRenderRoster() {
+    const list = document.getElementById('rt-roster-list');
+    const countEl = document.getElementById('rt-roster-count');
+    if (!list) return;
+    if (countEl) countEl.textContent = _rtRoster.length;
+
+    if (_rtRoster.length === 0) {
+        list.innerHTML = '<div class="rt-empty-roster">Drag personas here to add them</div>';
+        return;
+    }
+
+    const roles = ['Leader', 'Advisor', "Devil's Advocate", 'Observer', 'Creative Thinker', 'Analyst', 'Mediator', 'Critic', 'Participant'];
+    list.innerHTML = _rtRoster.map((r, i) => `
+        <div class="rt-roster-card" data-idx="${i}" draggable="true" style="border-left: 3px solid ${r.trim_color || '#4a9eff'}">
+            <span class="rt-roster-rank">#${i + 1}</span>
+            <img class="rt-roster-avatar" src="/api/personas/${r.name}/avatar"
+                 onerror="this.style.display='none'" style="border-color:${r.trim_color || '#4a9eff'}">
+            <span class="rt-roster-name">${r.name}</span>
+            <select class="rt-role-select" data-idx="${i}">
+                ${roles.map(role => `<option value="${role}" ${r.role === role ? 'selected' : ''}>${role}</option>`).join('')}
+            </select>
+            <button class="rt-roster-remove" data-idx="${i}" title="Remove">\u{2715}</button>
+        </div>
+    `).join('');
+
+    // Role change
+    list.querySelectorAll('.rt-role-select').forEach(sel => {
+        sel.addEventListener('change', () => {
+            _rtRoster[parseInt(sel.dataset.idx)].role = sel.value;
+        });
+    });
+
+    // Remove button
+    list.querySelectorAll('.rt-roster-remove').forEach(btn => {
+        btn.addEventListener('click', () => {
+            _rtRoster.splice(parseInt(btn.dataset.idx), 1);
+            _rtRoster.forEach((r, i) => r.order = i);
+            _rtRenderRoster();
+            _rtRenderPool();
+        });
+    });
+
+    // Drag reorder within roster
+    list.querySelectorAll('.rt-roster-card').forEach(card => {
+        card.addEventListener('dragstart', e => {
+            e.dataTransfer.setData('text/roster-idx', card.dataset.idx);
+            card.classList.add('rt-dragging');
+        });
+        card.addEventListener('dragend', () => card.classList.remove('rt-dragging'));
+        card.addEventListener('dragover', e => {
+            e.preventDefault();
+            card.classList.add('rt-reorder-hover');
+        });
+        card.addEventListener('dragleave', () => card.classList.remove('rt-reorder-hover'));
+        card.addEventListener('drop', e => {
+            e.preventDefault();
+            e.stopPropagation();
+            card.classList.remove('rt-reorder-hover');
+            const fromIdx = parseInt(e.dataTransfer.getData('text/roster-idx'));
+            const toIdx = parseInt(card.dataset.idx);
+            if (!isNaN(fromIdx) && fromIdx !== toIdx) {
+                const [moved] = _rtRoster.splice(fromIdx, 1);
+                _rtRoster.splice(toIdx, 0, moved);
+                _rtRoster.forEach((r, i) => r.order = i);
+                _rtRenderRoster();
+            }
+        });
+    });
+}
+
+async function _rtStartDiscussion() {
+    const topic = document.getElementById('rt-topic')?.value.trim();
+    if (!topic) { alert('Enter a topic first.'); return; }
+    if (_rtRoster.length < 2) { alert('Add at least 2 personas to the roster.'); return; }
+
+    const mode = document.querySelector('input[name="rt-llm-mode"]:checked')?.value || 'per_persona';
+    const provider = document.getElementById('rt-provider-select')?.value || 'auto';
+
+    try {
+        const resp = await fetch('/api/plugin/mission-control/roundtable/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+            body: JSON.stringify({
+                topic,
+                roster: _rtRoster.map((r, i) => ({ name: r.name, role: r.role, order: i })),
+                llm_mode: mode,
+                force_provider: mode === 'single' ? provider : '',
+                force_model: '',
+            })
+        });
+        const data = await resp.json();
+        if (data.error) { alert(data.error); return; }
+
+        _rtSession = data.session_id;
+        _rtRunning = true;
+        _rtPaused = false;
+        _rtUpdateControls();
+
+        // Clear transcript
+        const transcript = document.getElementById('rt-transcript');
+        if (transcript) transcript.innerHTML = '';
+
+        // Start auto-advancing
+        _rtAdvanceLoop();
+    } catch (e) {
+        console.error('[RT] Start error:', e);
+        alert('Failed to start discussion.');
+    }
+}
+
+async function _rtAdvanceLoop() {
+    while (_rtRunning && !_rtPaused && _rtSession) {
+        // Show typing indicator for next persona
+        const rosterIdx = _rtRoster.length > 0 ? undefined : 0; // Backend tracks the index
+        _rtShowTyping();
+
+        try {
+            const resp = await fetch('/api/plugin/mission-control/roundtable/next-turn', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                body: JSON.stringify({ session_id: _rtSession })
+            });
+            const data = await resp.json();
+            _rtHideTyping();
+
+            if (data.error) {
+                _rtAppendSystem(`Error: ${data.error}` + (data.persona ? ` (${data.persona}'s turn)` : ''));
+                break;
+            }
+
+            _rtAppendMessage(data.entry);
+
+            if (!data.has_more) {
+                // Round complete — pause for user to interject or start next round
+                _rtRunning = false;
+                _rtUpdateControls();
+                _rtAppendSystem(`Round ${data.round} complete. Send a message or click Next Round.`);
+                break;
+            }
+
+            // Small delay between turns for readability
+            await new Promise(r => setTimeout(r, 800));
+        } catch (e) {
+            _rtHideTyping();
+            console.error('[RT] Advance error:', e);
+            _rtAppendSystem('Connection error — try resuming.');
+            _rtRunning = false;
+            _rtUpdateControls();
+            break;
+        }
+    }
+}
+
+function _rtAppendMessage(entry) {
+    const transcript = document.getElementById('rt-transcript');
+    if (!transcript) return;
+    const color = entry.trim_color || '#4a9eff';
+    const isUser = entry.persona === 'You';
+    const div = document.createElement('div');
+    div.className = `rt-message ${isUser ? 'rt-message-user' : ''}`;
+    div.style.borderLeftColor = color;
+    div.innerHTML = `
+        <div class="rt-msg-header">
+            ${!isUser ? `<img class="rt-msg-avatar" src="/api/personas/${entry.persona}/avatar"
+                 onerror="this.style.display='none'" style="border-color:${color}">` : ''}
+            <span class="rt-msg-name" style="color:${color}">${entry.persona}</span>
+            <span class="rt-msg-role">${entry.role}</span>
+        </div>
+        <div class="rt-msg-content">${_escHtml(entry.content).replace(/\n/g, '<br>')}</div>
+    `;
+    transcript.appendChild(div);
+    transcript.scrollTop = transcript.scrollHeight;
+}
+
+function _rtAppendSystem(text) {
+    const transcript = document.getElementById('rt-transcript');
+    if (!transcript) return;
+    const div = document.createElement('div');
+    div.className = 'rt-system-msg';
+    div.textContent = text;
+    transcript.appendChild(div);
+    transcript.scrollTop = transcript.scrollHeight;
+}
+
+function _rtShowTyping() {
+    const transcript = document.getElementById('rt-transcript');
+    if (!transcript) return;
+    let el = document.getElementById('rt-typing');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'rt-typing';
+        el.className = 'rt-typing';
+        el.innerHTML = '<span class="rt-typing-dots"><span>.</span><span>.</span><span>.</span></span> Thinking...';
+        transcript.appendChild(el);
+    }
+    transcript.scrollTop = transcript.scrollHeight;
+}
+
+function _rtHideTyping() {
+    const el = document.getElementById('rt-typing');
+    if (el) el.remove();
+}
+
+async function _rtInterject() {
+    const input = document.getElementById('rt-interject-input');
+    if (!input) return;
+    const msg = input.value.trim();
+    if (!msg || !_rtSession) return;
+
+    try {
+        const resp = await fetch('/api/plugin/mission-control/roundtable/interject', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+            body: JSON.stringify({ session_id: _rtSession, message: msg })
+        });
+        const data = await resp.json();
+        if (data.error) { console.error('[RT] Interject error:', data.error); return; }
+
+        input.value = '';
+        _rtAppendMessage(data.entry);
+
+        // Auto-resume discussion after interjection
+        _rtRunning = true;
+        _rtPaused = false;
+        _rtUpdateControls();
+        _rtAdvanceLoop();
+    } catch (e) {
+        console.error('[RT] Interject error:', e);
+    }
+}
+
+function _rtPause() {
+    _rtPaused = true;
+    _rtRunning = false;
+    _rtUpdateControls();
+}
+
+function _rtResume() {
+    _rtPaused = false;
+    _rtRunning = true;
+    _rtUpdateControls();
+    _rtAdvanceLoop();
+}
+
+function _rtNextRound() {
+    _rtRunning = true;
+    _rtPaused = false;
+    _rtUpdateControls();
+    _rtAdvanceLoop();
+}
+
+async function _rtStop() {
+    _rtRunning = false;
+    _rtPaused = false;
+    if (_rtSession) {
+        try {
+            await fetch('/api/plugin/mission-control/roundtable/stop', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                body: JSON.stringify({ session_id: _rtSession })
+            });
+        } catch (e) { /* ignore */ }
+    }
+    _rtSession = null;
+    _rtUpdateControls();
+    _rtAppendSystem('Discussion ended.');
+}
+
+function _rtUpdateControls() {
+    const start = document.getElementById('rt-start');
+    const pause = document.getElementById('rt-pause');
+    const resume = document.getElementById('rt-resume');
+    const next = document.getElementById('rt-next-round');
+    const stop = document.getElementById('rt-stop');
+    const topic = document.getElementById('rt-topic');
+
+    const active = !!_rtSession;
+    const running = _rtRunning;
+
+    if (start) start.style.display = active ? 'none' : '';
+    if (pause) pause.style.display = active && running ? '' : 'none';
+    if (resume) resume.style.display = active && !running && _rtPaused ? '' : 'none';
+    if (next) next.style.display = active && !running && !_rtPaused ? '' : 'none';
+    if (stop) stop.style.display = active ? '' : 'none';
+    if (topic) topic.disabled = active;
+}
+
+
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
 function _injectStyles() {
@@ -6770,6 +7265,197 @@ select.mc-input { cursor: pointer; }
     .mc-week-grid > * { max-width: none; }
     .mc-pixel-stage { max-height: 60vh; }
     .mc-pixel-hub { width: 50px; }
+}
+
+/* ─── Round Table ─── */
+.rt-root {
+    display: flex; flex-direction: column; height: 100vh;
+    background: #06060a; color: #e0e0e0; font-family: inherit;
+}
+.rt-header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 16px 24px; border-bottom: 1px solid #1a1a24;
+}
+.rt-title { margin: 0; font-size: 1.3rem; font-weight: 700; color: #fff; flex: 1; }
+.rt-llm-mode { display: flex; align-items: center; gap: 12px; font-size: 0.8rem; }
+.rt-mode-label { display: flex; align-items: center; gap: 4px; color: #aaa; cursor: pointer; }
+.rt-mode-label input { accent-color: #4a9eff; }
+.rt-single-options { display: flex; align-items: center; gap: 6px; }
+#rt-provider-select {
+    background: #111118; border: 1px solid #222; color: #ccc; border-radius: 6px;
+    padding: 4px 8px; font-size: 0.78rem;
+}
+
+.rt-topic-bar {
+    display: flex; gap: 8px; padding: 12px 24px; border-bottom: 1px solid #1a1a24;
+    align-items: center;
+}
+.rt-topic-input {
+    flex: 1; background: #111118; border: 1px solid #222; color: #e0e0e0;
+    border-radius: 8px; padding: 10px 14px; font-size: 0.9rem; outline: none;
+}
+.rt-topic-input:focus { border-color: #4a9eff; }
+.rt-topic-input:disabled { opacity: 0.5; }
+.rt-btn {
+    background: #111118; border: 1px solid #333; color: #ccc; border-radius: 8px;
+    padding: 8px 16px; font-size: 0.82rem; cursor: pointer; transition: all 0.15s;
+    white-space: nowrap;
+}
+.rt-btn:hover { background: #1a1a28; border-color: #4a9eff; color: #fff; }
+.rt-btn-start { border-color: #4caf50; color: #4caf50; }
+.rt-btn-start:hover { background: rgba(76,175,80,0.1); }
+.rt-btn-pause { border-color: #ff9800; color: #ff9800; }
+.rt-btn-stop { border-color: #f44336; color: #f44336; }
+.rt-btn-stop:hover { background: rgba(244,67,54,0.1); }
+.rt-btn-next { border-color: #4a9eff; color: #4a9eff; }
+.rt-btn-send { padding: 8px 12px; font-size: 1rem; }
+
+.rt-body {
+    display: flex; flex: 1; overflow: hidden;
+}
+
+/* Roster panel */
+.rt-roster-panel {
+    width: 280px; min-width: 240px; border-right: 1px solid #1a1a24;
+    display: flex; flex-direction: column; overflow-y: auto;
+    background: #08080e;
+}
+.rt-roster-title {
+    margin: 0; padding: 12px 16px 8px; font-size: 0.9rem; color: #ccc;
+    display: flex; align-items: center; gap: 8px;
+}
+.rt-roster-count {
+    background: #1a1a2e; color: #888; font-size: 0.65rem; padding: 2px 8px;
+    border-radius: 10px;
+}
+.rt-roster-list {
+    padding: 8px 12px; min-height: 100px;
+    border-bottom: 1px solid #1a1a24;
+    transition: background 0.2s;
+}
+.rt-drop-hover { background: rgba(74,158,255,0.06); }
+.rt-empty-roster { color: #555; font-size: 0.78rem; text-align: center; padding: 20px 0; }
+
+.rt-roster-card {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: #0d0d14; border-radius: 8px; margin-bottom: 6px;
+    border-left: 3px solid #4a9eff; cursor: grab; transition: all 0.15s;
+}
+.rt-roster-card:hover { background: #15151f; }
+.rt-roster-card.rt-dragging { opacity: 0.4; }
+.rt-roster-card.rt-reorder-hover { box-shadow: 0 -2px 0 #4a9eff; }
+.rt-roster-rank { font-size: 0.7rem; color: #666; font-weight: 700; min-width: 20px; }
+.rt-roster-avatar {
+    width: 28px; height: 28px; border-radius: 50%; border: 2px solid #4a9eff;
+    object-fit: cover; flex-shrink: 0;
+}
+.rt-roster-name { flex: 1; font-size: 0.82rem; font-weight: 600; color: #ddd; text-transform: capitalize; }
+.rt-role-select {
+    background: #111118; border: 1px solid #222; color: #aaa; border-radius: 4px;
+    padding: 2px 4px; font-size: 0.7rem; max-width: 100px;
+}
+.rt-roster-remove {
+    background: none; border: none; color: #555; cursor: pointer; font-size: 0.8rem;
+    padding: 2px 4px; border-radius: 4px;
+}
+.rt-roster-remove:hover { color: #f44336; background: rgba(244,67,54,0.1); }
+
+/* Persona pool */
+.rt-persona-pool-title {
+    padding: 10px 16px 6px; font-size: 0.78rem; color: #888; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.05em;
+}
+.rt-persona-pool {
+    padding: 6px 12px; flex: 1; overflow-y: auto;
+    display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start;
+}
+.rt-pool-empty { color: #555; font-size: 0.75rem; padding: 8px; }
+.rt-persona-chip {
+    display: flex; align-items: center; gap: 6px; padding: 5px 10px;
+    background: #0d0d14; border: 1px solid #222; border-radius: 20px;
+    cursor: grab; transition: all 0.15s; font-size: 0.75rem;
+}
+.rt-persona-chip:hover { background: #15151f; border-color: #4a9eff; }
+.rt-persona-chip.rt-dragging { opacity: 0.4; }
+.rt-chip-avatar {
+    width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid #4a9eff;
+    object-fit: cover;
+}
+.rt-chip-name { color: #ccc; text-transform: capitalize; }
+
+/* Transcript */
+.rt-transcript-panel {
+    flex: 1; display: flex; flex-direction: column; overflow: hidden;
+}
+.rt-transcript {
+    flex: 1; overflow-y: auto; padding: 16px 24px;
+    display: flex; flex-direction: column; gap: 12px;
+}
+.rt-transcript-empty { color: #555; text-align: center; padding: 60px 20px; font-size: 0.9rem; }
+
+.rt-message {
+    border-left: 3px solid #4a9eff; padding: 10px 14px; background: #0a0a12;
+    border-radius: 0 8px 8px 0; animation: rt-fade-in 0.3s ease;
+}
+.rt-message-user { background: #0d1117; border-left-color: #fff; }
+.rt-msg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.rt-msg-avatar {
+    width: 28px; height: 28px; border-radius: 50%; border: 2px solid #4a9eff;
+    object-fit: cover; flex-shrink: 0;
+}
+.rt-msg-name { font-weight: 700; font-size: 0.85rem; text-transform: capitalize; }
+.rt-msg-role { font-size: 0.72rem; color: #888; }
+.rt-msg-content { font-size: 0.85rem; line-height: 1.6; color: #ccc; }
+
+.rt-system-msg {
+    text-align: center; color: #666; font-size: 0.78rem; padding: 8px;
+    border-top: 1px solid #1a1a24; border-bottom: 1px solid #1a1a24;
+}
+
+.rt-typing {
+    color: #888; font-size: 0.8rem; padding: 8px 14px;
+    animation: rt-fade-in 0.3s ease;
+}
+.rt-typing-dots span {
+    animation: rt-dot-bounce 1.4s infinite ease-in-out both;
+    font-size: 1.2rem;
+}
+.rt-typing-dots span:nth-child(1) { animation-delay: 0s; }
+.rt-typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.rt-typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes rt-dot-bounce {
+    0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; }
+}
+@keyframes rt-fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Interject bar */
+.rt-interject-bar {
+    display: flex; gap: 8px; padding: 12px 16px;
+    border-top: 1px solid #1a1a24; background: #08080e;
+}
+.rt-interject-input {
+    flex: 1; background: #111118; border: 1px solid #222; color: #e0e0e0;
+    border-radius: 8px; padding: 10px 14px; font-size: 0.85rem; outline: none;
+    resize: none; font-family: inherit;
+}
+.rt-interject-input:focus { border-color: #4a9eff; }
+
+/* Round Table button style in reflect bar */
+.mc-reflect-btn-roundtable {
+    background: linear-gradient(135deg, rgba(74,158,255,0.08), rgba(255,152,0,0.08));
+    border-color: rgba(74,158,255,0.2);
+}
+.mc-reflect-btn-roundtable:hover {
+    background: linear-gradient(135deg, rgba(74,158,255,0.15), rgba(255,152,0,0.15));
+    border-color: rgba(74,158,255,0.4);
+}
+
+/* Round Table responsive */
+@media (max-width: 800px) {
+    .rt-body { flex-direction: column; }
+    .rt-roster-panel { width: 100%; max-width: none; max-height: 250px; border-right: none; border-bottom: 1px solid #1a1a24; }
+    .rt-header { flex-wrap: wrap; padding: 12px 16px; }
+    .rt-topic-bar { padding: 8px 16px; }
 }
 `;
     document.head.appendChild(style);
