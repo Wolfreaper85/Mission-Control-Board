@@ -164,8 +164,8 @@ def run(event):
     if not digest:
         return "No data to report"
 
-    # Get the Discord channel from settings or use default
-    channel = settings.get("digest_channel", DEFAULT_CHANNEL)
+    # Get the Discord channel from settings or use default (strip # prefix if present)
+    channel = settings.get("digest_channel", DEFAULT_CHANNEL).strip().lstrip("#")
 
     # Send via Discord daemon directly (bypasses scope_discord ContextVar
     # which isn't set during scheduled tasks / cron runs)
@@ -188,8 +188,10 @@ def run(event):
 
         # Resolve channel by name
         target_channel = None
+        all_channels = []
         for guild in client.guilds:
             for ch in guild.text_channels:
+                all_channels.append(ch.name)
                 if ch.name == channel:
                     target_channel = ch
                     break
@@ -197,7 +199,7 @@ def run(event):
                 break
 
         if not target_channel:
-            logger.error(f"Health digest: Channel '#{channel}' not found")
+            logger.error(f"Health digest: Channel '#{channel}' not found. Available: {all_channels[:20]}")
             return f"Channel '#{channel}' not found"
 
         # Send the message
