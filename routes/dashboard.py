@@ -1179,6 +1179,8 @@ async def create_calendar_event(**kwargs):
         return {"error": "title and start_date are required"}
     try:
         plugin = _load_reflection()
+        reminder_val = body.get("reminder_minutes")
+        reminder_minutes = int(reminder_val) if reminder_val is not None and str(reminder_val) != "" else None
         eid = plugin.save_calendar_event(
             title=title,
             start_date=start_date,
@@ -1188,6 +1190,8 @@ async def create_calendar_event(**kwargs):
             color=body.get("color", "#4a9eff"),
             category=body.get("category", "event"),
             scope=body.get("scope", "default"),
+            start_time=body.get("start_time"),
+            reminder_minutes=reminder_minutes,
         )
         return {"success": True, "id": eid}
     except Exception as e:
@@ -1204,9 +1208,12 @@ async def update_calendar_event(**kwargs):
     try:
         plugin = _load_reflection()
         fields = {}
-        for k in ("title", "description", "start_date", "end_date", "all_day", "color", "category"):
+        for k in ("title", "description", "start_date", "end_date", "start_time", "all_day", "color", "category", "reminder_minutes"):
             if k in body:
                 fields[k] = body[k]
+        # If reminder settings changed, reset reminded flag
+        if "reminder_minutes" in body or "start_time" in body or "start_date" in body:
+            fields["reminded"] = 0
         ok = plugin.update_calendar_event(eid, **fields)
         return {"success": ok}
     except Exception as e:
@@ -1227,3 +1234,14 @@ async def delete_calendar_event(**kwargs):
     except Exception as e:
         logger.error(f"delete_calendar_event error: {e}")
         return {"error": str(e)}
+
+
+async def check_calendar_reminders(**kwargs):
+    """Check for due calendar reminders. Called by frontend polling."""
+    try:
+        plugin = _load_reflection()
+        due = plugin.get_due_reminders()
+        return {"reminders": due}
+    except Exception as e:
+        logger.error(f"check_calendar_reminders error: {e}")
+        return {"reminders": [], "error": str(e)}

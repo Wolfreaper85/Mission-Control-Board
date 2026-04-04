@@ -1165,6 +1165,24 @@ function _buildLayout() {
                 </div>
                 <div class="mc-event-row">
                     <div class="mc-event-field">
+                        <label class="mc-label">Time</label>
+                        <input type="time" class="mc-input" id="mc-event-time" value="09:00">
+                    </div>
+                    <div class="mc-event-field">
+                        <label class="mc-label">\u{1F514} Reminder</label>
+                        <select class="mc-input" id="mc-event-reminder">
+                            <option value="">No reminder</option>
+                            <option value="0">At time of event</option>
+                            <option value="5">5 minutes before</option>
+                            <option value="15">15 minutes before</option>
+                            <option value="30">30 minutes before</option>
+                            <option value="60">1 hour before</option>
+                            <option value="1440">1 day before</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="mc-event-row">
+                    <div class="mc-event-field">
                         <label class="mc-label">Color</label>
                         <div class="mc-event-colors" id="mc-event-colors">
                             <span class="mc-event-color-opt mc-event-color-sel" data-color="#4a9eff" style="background:#4a9eff" title="Blue"></span>
@@ -1626,6 +1644,10 @@ function _startDashboardPolling() {
             });
         }
     }, 10000);
+    // Reminder polling — check every 30 seconds
+    if (window._mcReminderInterval) clearInterval(window._mcReminderInterval);
+    window._mcReminderInterval = setInterval(_checkReminders, 30000);
+    _checkReminders(); // Immediate first check
     _chatRefreshInterval = setInterval(() => {
         if (!_isStreaming) _loadChatHistory();
     }, 30000);
@@ -3068,6 +3090,114 @@ async function _loadToolStatus() {
 
 let _editingEventId = null;
 
+// ─── Reminder / Alarm System ───────────────────────────────────────────────
+
+async function _checkReminders() {
+    try {
+        const resp = await fetch('/api/plugin/mission-control/calendar/reminders', {
+            headers: { 'X-CSRF-Token': CSRF() }
+        });
+        const data = await resp.json();
+        const reminders = data.reminders || [];
+        for (const r of reminders) {
+            _fireReminder(r);
+        }
+    } catch (e) {
+        // Silent fail — polling
+    }
+}
+
+function _fireReminder(event) {
+    const title = event.title || 'Calendar Event';
+    const time = event.start_time || '';
+    const timeStr = time ? ` at ${time}` : '';
+
+    // Play alarm sound
+    _playAlarmSound();
+
+    // Show in-app toast
+    _showReminderToast(title, timeStr, event.color || '#4a9eff');
+
+    // Browser notification (if permission granted)
+    if (Notification.permission === 'granted') {
+        new Notification('\u{1F514} Mission Control Reminder', {
+            body: `${title}${timeStr}`,
+            icon: '/static/favicon.ico',
+            tag: `mc-reminder-${event.id}`,
+        });
+    } else if (Notification.permission !== 'denied') {
+        Notification.requestPermission().then(perm => {
+            if (perm === 'granted') {
+                new Notification('\u{1F514} Mission Control Reminder', {
+                    body: `${title}${timeStr}`,
+                    icon: '/static/favicon.ico',
+                    tag: `mc-reminder-${event.id}`,
+                });
+            }
+        });
+    }
+}
+
+function _playAlarmSound() {
+    try {
+        // Generate a pleasant alarm chime using Web Audio API
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+        notes.forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.15);
+            gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + i * 0.15 + 0.05);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.15 + 0.4);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(ctx.currentTime + i * 0.15);
+            osc.stop(ctx.currentTime + i * 0.15 + 0.5);
+        });
+    } catch (e) {
+        console.warn('[MC] Audio alarm failed:', e);
+    }
+}
+
+function _showReminderToast(title, timeStr, color) {
+    // Create toast container if not exists
+    let container = document.getElementById('mc-reminder-toasts');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'mc-reminder-toasts';
+        container.style.cssText = 'position:fixed;top:20px;right:20px;z-index:99999;display:flex;flex-direction:column;gap:10px;pointer-events:none;';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = 'mc-reminder-toast';
+    toast.style.cssText = `
+        pointer-events:auto; background:#111118; border:1px solid ${color};
+        border-left:4px solid ${color}; border-radius:10px; padding:14px 18px;
+        min-width:280px; max-width:380px; box-shadow:0 8px 32px rgba(0,0,0,0.5);
+        animation: mc-toast-in 0.4s ease-out; display:flex; align-items:flex-start; gap:10px;
+    `;
+    toast.innerHTML = `
+        <span style="font-size:1.4rem;flex-shrink:0">\u{1F514}</span>
+        <div style="flex:1;min-width:0">
+            <div style="font-weight:700;font-size:0.85rem;color:#e0e0e0;margin-bottom:2px">Reminder</div>
+            <div style="font-size:0.8rem;color:#ccc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(title)}${timeStr}</div>
+        </div>
+        <button style="background:none;border:none;color:#666;cursor:pointer;font-size:1rem;padding:0 2px;flex-shrink:0" onclick="this.parentElement.remove()">\u{2715}</button>
+    `;
+    container.appendChild(toast);
+
+    // Auto-dismiss after 10 seconds
+    setTimeout(() => {
+        if (toast.parentElement) {
+            toast.style.animation = 'mc-toast-out 0.3s ease-in forwards';
+            setTimeout(() => toast.remove(), 300);
+        }
+    }, 10000);
+}
+
 async function _loadCalendarEvents() {
     const y = _calendarYear;
     const m = _calendarMonth;
@@ -3151,8 +3281,10 @@ function _renderFullCalendar() {
             const clickAttr = isCustom ? `data-event-id="${ev.id}"` : '';
             const catIcon = _calCatIcon(ev.category || ev._source || 'event');
             html += `<div class="mc-fullcal-event" style="border-left:3px solid ${color};background:${color}15" ${clickAttr}>`;
+            const hasReminder = ev.reminder_minutes != null && ev._source === 'custom';
             html += `<span class="mc-fullcal-event-icon">${catIcon}</span>`;
             html += `<span class="mc-fullcal-event-title">${_esc(ev.title)}</span>`;
+            if (hasReminder) html += `<span class="mc-fullcal-event-bell">\u{1F514}</span>`;
             html += '</div>';
         }
         if (extra > 0) {
@@ -3201,6 +3333,8 @@ function _showEventModal(event = null, date = null) {
     const descInput = document.getElementById('mc-event-desc');
     const startInput = document.getElementById('mc-event-start');
     const endInput = document.getElementById('mc-event-end');
+    const timeInput = document.getElementById('mc-event-time');
+    const reminderInput = document.getElementById('mc-event-reminder');
     const catInput = document.getElementById('mc-event-category');
     const deleteBtn = document.getElementById('mc-event-delete');
     const modalTitle = document.getElementById('mc-event-modal-title');
@@ -3212,6 +3346,8 @@ function _showEventModal(event = null, date = null) {
         descInput.value = event.description || '';
         startInput.value = (event.start_date || '').substring(0, 10);
         endInput.value = (event.end_date || '').substring(0, 10);
+        timeInput.value = event.start_time || '09:00';
+        reminderInput.value = event.reminder_minutes != null ? String(event.reminder_minutes) : '';
         catInput.value = event.category || 'event';
         deleteBtn.style.display = '';
         const color = event.color || '#4a9eff';
@@ -3225,6 +3361,8 @@ function _showEventModal(event = null, date = null) {
         descInput.value = '';
         startInput.value = date || new Date().toISOString().substring(0, 10);
         endInput.value = date || new Date().toISOString().substring(0, 10);
+        timeInput.value = '09:00';
+        reminderInput.value = '';
         catInput.value = 'event';
         deleteBtn.style.display = 'none';
         document.querySelectorAll('.mc-event-color-opt').forEach(o => {
@@ -3246,6 +3384,9 @@ async function _saveCalendarEvent() {
     const description = document.getElementById('mc-event-desc').value.trim();
     const start_date = document.getElementById('mc-event-start').value;
     const end_date = document.getElementById('mc-event-end').value;
+    const start_time = document.getElementById('mc-event-time').value || '09:00';
+    const reminderVal = document.getElementById('mc-event-reminder').value;
+    const reminder_minutes = reminderVal !== '' ? parseInt(reminderVal) : null;
     const category = document.getElementById('mc-event-category').value;
     const colorEl = document.querySelector('.mc-event-color-opt.mc-event-color-sel');
     const color = colorEl ? colorEl.dataset.color : '#4a9eff';
@@ -3253,19 +3394,20 @@ async function _saveCalendarEvent() {
     if (!title || !start_date) return;
 
     const scope = _selectedMemoryScope || 'default';
+    const payload = { title, description, start_date, end_date: end_date || start_date, start_time, reminder_minutes, color, category };
 
     try {
         if (_editingEventId) {
             await fetch('/api/plugin/mission-control/calendar/update', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
-                body: JSON.stringify({ id: _editingEventId, title, description, start_date, end_date: end_date || start_date, color, category })
+                body: JSON.stringify({ id: _editingEventId, ...payload })
             });
         } else {
             await fetch('/api/plugin/mission-control/calendar/create', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
-                body: JSON.stringify({ title, description, start_date, end_date: end_date || start_date, color, category, scope })
+                body: JSON.stringify({ ...payload, scope })
             });
         }
         _hideEventModal();
@@ -7318,6 +7460,19 @@ select.mc-input { cursor: pointer; }
 .mc-event-color-opt.mc-event-color-sel {
     border-color: #fff; transform: scale(1.15);
     box-shadow: 0 0 8px rgba(255,255,255,0.2);
+}
+
+/* Reminder indicator on calendar events */
+.mc-fullcal-event-bell { font-size: 0.5rem; flex-shrink: 0; opacity: 0.7; }
+
+/* Toast animations */
+@keyframes mc-toast-in {
+    from { opacity: 0; transform: translateX(40px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+@keyframes mc-toast-out {
+    from { opacity: 1; transform: translateX(0); }
+    to { opacity: 0; transform: translateX(40px); }
 }
 
 @media (max-width: 768px) {

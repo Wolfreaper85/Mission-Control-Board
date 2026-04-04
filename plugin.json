@@ -290,6 +290,11 @@
                 "method": "POST",
                 "path": "calendar/delete",
                 "handler": "routes/dashboard.py:delete_calendar_event"
+            },
+            {
+                "method": "GET",
+                "path": "calendar/reminders",
+                "handler": "routes/dashboard.py:check_calendar_reminders"
             }
         ]
     }

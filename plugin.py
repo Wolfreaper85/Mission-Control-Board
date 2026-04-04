@@ -5,7 +5,7 @@
 import json
 import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -145,14 +145,23 @@ def ensure_tables():
                 description TEXT,
                 start_date TEXT NOT NULL,
                 end_date TEXT,
+                start_time TEXT,
                 all_day INTEGER DEFAULT 1,
                 color TEXT DEFAULT '#4a9eff',
                 category TEXT DEFAULT 'event',
+                reminder_minutes INTEGER,
+                reminded INTEGER DEFAULT 0,
                 scope TEXT NOT NULL DEFAULT 'default',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+        # Migration: add reminder columns to existing table
+        for col, default in [("start_time", "NULL"), ("reminder_minutes", "NULL"), ("reminded", "0")]:
+            try:
+                conn.execute(f'ALTER TABLE calendar_events ADD COLUMN {col} DEFAULT {default}')
+            except Exception:
+                pass
         conn.execute('CREATE INDEX IF NOT EXISTS idx_calendar_scope ON calendar_events(scope)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_calendar_start ON calendar_events(start_date)')
 
@@ -753,7 +762,7 @@ def get_reflection_stats(scope="default"):
 
 # ─── Calendar Events ────────────────────────────────────────────────────────
 
-def save_calendar_event(title, start_date, end_date=None, description="", all_day=1, color="#4a9eff", category="event", scope="default"):
+def save_calendar_event(title, start_date, end_date=None, description="", all_day=1, color="#4a9eff", category="event", scope="default", start_time=None, reminder_minutes=None):
     """Save a calendar event."""
     if not ensure_tables():
         return None
@@ -761,8 +770,8 @@ def save_calendar_event(title, start_date, end_date=None, description="", all_da
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO calendar_events (title, description, start_date, end_date, all_day, color, category, scope) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (title[:500], description[:2000] if description else "", start_date, end_date or start_date, all_day, color, category, scope)
+            "INSERT INTO calendar_events (title, description, start_date, end_date, start_time, all_day, color, category, scope, reminder_minutes, reminded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
+            (title[:500], description[:2000] if description else "", start_date, end_date or start_date, start_time, all_day, color, category, scope, reminder_minutes)
         )
         conn.commit()
         eid = cursor.lastrowid
@@ -800,7 +809,7 @@ def update_calendar_event(event_id, **fields):
     """Update a calendar event."""
     if not ensure_tables():
         return False
-    allowed = {"title", "description", "start_date", "end_date", "all_day", "color", "category"}
+    allowed = {"title", "description", "start_date", "end_date", "start_time", "all_day", "color", "category", "reminder_minutes", "reminded"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return False
@@ -816,6 +825,49 @@ def update_calendar_event(event_id, **fields):
     except Exception as e:
         logger.error(f"Calendar: update_event error: {e}")
         return False
+
+
+def get_due_reminders():
+    """Get calendar events whose reminders are due now (not yet reminded)."""
+    if not ensure_tables():
+        return []
+    try:
+        conn = get_connection()
+        now = datetime.now()
+        # Get all events with reminders that haven't fired yet
+        rows = conn.execute(
+            "SELECT * FROM calendar_events WHERE reminder_minutes IS NOT NULL AND reminded = 0 AND start_date >= ?",
+            (now.strftime("%Y-%m-%d"),)
+        ).fetchall()
+
+        due = []
+        for r in rows:
+            row = dict(r)
+            # Build the event datetime
+            event_date = row["start_date"][:10]
+            event_time = row.get("start_time") or "09:00"
+            try:
+                event_dt = datetime.strptime(f"{event_date} {event_time}", "%Y-%m-%d %H:%M")
+            except Exception:
+                event_dt = datetime.strptime(f"{event_date} 09:00", "%Y-%m-%d %H:%M")
+
+            # Check if reminder is due
+            remind_at = event_dt - timedelta(minutes=row["reminder_minutes"])
+            if now >= remind_at:
+                due.append(row)
+
+        # Mark them as reminded
+        if due:
+            ids = [d["id"] for d in due]
+            placeholders = ",".join("?" * len(ids))
+            conn.execute(f"UPDATE calendar_events SET reminded = 1 WHERE id IN ({placeholders})", ids)
+            conn.commit()
+
+        conn.close()
+        return due
+    except Exception as e:
+        logger.error(f"Calendar: get_due_reminders error: {e}")
+        return []
 
 
 def delete_calendar_event(event_id):
