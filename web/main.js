@@ -666,6 +666,10 @@ function _buildLayout() {
                     <span class="mc-reflect-btn-icon">\u{1F9E0}</span>
                     <span class="mc-reflect-btn-label">Self-Reflection</span>
                 </button>
+                <button class="mc-reflect-btn mc-reflect-btn-tools" id="mc-open-tools">
+                    <span class="mc-reflect-btn-icon">\u{1F6E0}\u{FE0F}</span>
+                    <span class="mc-reflect-btn-label">Tools</span>
+                </button>
             </div>
 
             <!-- Stats Row -->
@@ -1095,6 +1099,22 @@ function _buildLayout() {
                 </div>
                 <div class="mc-overlay-tab-content" id="mc-ref-tab-capsules" style="display:none">
                     <div class="mc-capsules-grid" id="mc-capsules-grid"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tools Status Overlay -->
+    <div class="mc-overlay" id="mc-tools-overlay" style="display:none">
+        <div class="mc-overlay-panel mc-overlay-wide">
+            <div class="mc-overlay-header">
+                <h2>\u{1F6E0}\u{FE0F} Mission Control Tools</h2>
+                <button class="mc-overlay-close" id="mc-tools-close">\u{2715}</button>
+            </div>
+            <div class="mc-overlay-body">
+                <div class="mc-tools-info" id="mc-tools-info"></div>
+                <div class="mc-tools-list" id="mc-tools-list">
+                    <div class="mc-empty">Loading tools...</div>
                 </div>
             </div>
         </div>
@@ -2887,6 +2907,69 @@ function _initNotes() {
 
 // ─── Self-Reflection ────────────────────────────────────────────────────────
 
+// ─── Tool Status ────────────────────────────────────────────────────────────
+
+async function _loadToolStatus() {
+    const infoEl = document.getElementById('mc-tools-info');
+    const listEl = document.getElementById('mc-tools-list');
+    if (!listEl) return;
+
+    listEl.innerHTML = '<div class="mc-empty">Loading...</div>';
+
+    try {
+        const resp = await fetch('/api/plugin/mission-control/tools/status', { headers: { 'X-CSRF-Token': CSRF() } });
+        const data = await resp.json();
+
+        if (data.error) {
+            listEl.innerHTML = `<div class="mc-empty">Error: ${_esc(data.error)}</div>`;
+            return;
+        }
+
+        // Toolset info banner
+        const ts = data.toolset || {};
+        if (infoEl) {
+            const enabledCount = (data.tools || []).filter(t => t.enabled).length;
+            const totalCount = (data.tools || []).length;
+            infoEl.innerHTML = `
+                <div class="mc-tools-banner">
+                    <span class="mc-tools-toolset">Toolset: <strong>${_esc(ts.toolset_name || 'unknown')}</strong></span>
+                    <span class="mc-tools-counts">${enabledCount}/${totalCount} MC tools active</span>
+                </div>
+            `;
+        }
+
+        // Tool cards
+        const tools = data.tools || [];
+        if (tools.length === 0) {
+            listEl.innerHTML = '<div class="mc-empty">No tools registered.</div>';
+            return;
+        }
+
+        listEl.innerHTML = tools.map(t => {
+            const statusClass = t.enabled ? 'mc-tool-enabled' : 'mc-tool-disabled';
+            const statusIcon = t.enabled ? '\u{2705}' : '\u{274C}';
+            const statusText = t.enabled ? 'Active' : 'Not in toolset';
+            const params = t.params && t.params.length ? t.params.map(p => `<span class="mc-tool-param">${_esc(p)}</span>`).join('') : '<span class="mc-tool-param mc-tool-param-none">none</span>';
+            return `
+                <div class="mc-tool-card ${statusClass}">
+                    <div class="mc-tool-header">
+                        <span class="mc-tool-status-icon">${statusIcon}</span>
+                        <span class="mc-tool-name">${_esc(t.name)}</span>
+                        <span class="mc-tool-status-badge ${statusClass}">${statusText}</span>
+                    </div>
+                    <div class="mc-tool-desc">${_esc(t.description)}</div>
+                    <div class="mc-tool-params">Params: ${params}</div>
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        listEl.innerHTML = '<div class="mc-empty">Failed to load tool status.</div>';
+        console.error('[MC] Tool status error:', e);
+    }
+}
+
+// ─── Self-Reflection ────────────────────────────────────────────────────────
+
 function _loadReflectionData(force) {
     const base = '/api/plugin/mission-control';
     const h = { 'X-CSRF-Token': CSRF() };
@@ -3288,6 +3371,15 @@ function _initReflection() {
 
     document.getElementById('mc-bulletin-close')?.addEventListener('click', _closeBulletin);
     document.getElementById('mc-reflection-close')?.addEventListener('click', _closeReflection);
+
+    // Tools overlay
+    const toolsOverlay = document.getElementById('mc-tools-overlay');
+    document.getElementById('mc-open-tools')?.addEventListener('click', () => {
+        toolsOverlay.style.display = 'flex';
+        _loadToolStatus();
+    });
+    document.getElementById('mc-tools-close')?.addEventListener('click', () => { toolsOverlay.style.display = 'none'; });
+    toolsOverlay?.addEventListener('click', e => { if (e.target === toolsOverlay) toolsOverlay.style.display = 'none'; });
 
     // Close on backdrop click
     bulletinOverlay?.addEventListener('click', e => { if (e.target === bulletinOverlay) _closeBulletin(); });
@@ -6774,6 +6866,48 @@ select.mc-input { cursor: pointer; }
     .mc-pixel-stage { max-height: 60vh; }
     .mc-pixel-hub { width: 50px; }
 }
+
+/* ─── Tools Status ─── */
+.mc-reflect-btn-tools {
+    background: linear-gradient(135deg, rgba(255,152,0,0.08), rgba(255,87,34,0.08));
+    border-color: rgba(255,152,0,0.2);
+}
+.mc-reflect-btn-tools:hover {
+    background: linear-gradient(135deg, rgba(255,152,0,0.15), rgba(255,87,34,0.15));
+    border-color: rgba(255,152,0,0.4);
+}
+.mc-tools-banner {
+    display: flex; align-items: center; justify-content: space-between;
+    background: #111118; border: 1px solid #1a1a24; border-radius: 10px;
+    padding: 12px 16px; margin-bottom: 14px;
+}
+.mc-tools-toolset { font-size: 0.85rem; color: #aaa; }
+.mc-tools-toolset strong { color: #4a9eff; }
+.mc-tools-counts { font-size: 0.8rem; color: #888; }
+.mc-tools-list { display: flex; flex-direction: column; gap: 8px; }
+.mc-tool-card {
+    background: #0d0d14; border: 1px solid #1a1a24; border-radius: 10px;
+    padding: 14px 16px; transition: border-color 0.15s;
+}
+.mc-tool-card:hover { border-color: #333; }
+.mc-tool-card.mc-tool-enabled { border-left: 3px solid #4caf50; }
+.mc-tool-card.mc-tool-disabled { border-left: 3px solid #f44336; opacity: 0.7; }
+.mc-tool-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.mc-tool-status-icon { font-size: 0.9rem; }
+.mc-tool-name { font-weight: 700; font-size: 0.88rem; color: #e0e0e0; font-family: monospace; }
+.mc-tool-status-badge {
+    margin-left: auto; font-size: 0.7rem; padding: 2px 8px; border-radius: 10px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em;
+}
+.mc-tool-status-badge.mc-tool-enabled { background: rgba(76,175,80,0.15); color: #4caf50; }
+.mc-tool-status-badge.mc-tool-disabled { background: rgba(244,67,54,0.15); color: #f44336; }
+.mc-tool-desc { font-size: 0.78rem; color: #888; line-height: 1.5; margin-bottom: 8px; }
+.mc-tool-params { display: flex; flex-wrap: wrap; gap: 4px; }
+.mc-tool-param {
+    font-size: 0.7rem; background: #111118; border: 1px solid #222;
+    color: #aaa; padding: 2px 8px; border-radius: 4px; font-family: monospace;
+}
+.mc-tool-param-none { color: #555; font-style: italic; }
 `;
     document.head.appendChild(style);
 }

@@ -265,6 +265,11 @@
                 "method": "GET",
                 "path": "reflection/stats",
                 "handler": "routes/dashboard.py:get_reflection_stats"
+            },
+            {
+                "method": "GET",
+                "path": "tools/status",
+                "handler": "routes/dashboard.py:get_tool_status"
             }
         ]
     }

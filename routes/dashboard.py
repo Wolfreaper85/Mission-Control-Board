@@ -1034,3 +1034,53 @@ async def get_reflection_stats(**kwargs):
     except Exception as e:
         logger.error(f"get_reflection_stats error: {e}")
         return {"corrections": 0, "reflections": 0, "rules_active": 0, "rules_total": 0, "bulletins_pending": 0, "capsules": 0}
+
+
+# ─── Tool Status ────────────────────────────────────────────────────────────
+
+async def get_tool_status(**kwargs):
+    """Get Mission Control tool registration and enabled status."""
+    try:
+        from core.api_fastapi import get_system
+        import importlib.util
+
+        system = get_system()
+        if not system or not hasattr(system, 'llm_chat'):
+            return {"tools": [], "error": "System not ready"}
+
+        fm = system.llm_chat.function_manager
+
+        # Load MC tool definitions from tools/mission.py
+        tools_path = Path(__file__).parent.parent / "tools" / "mission.py"
+        spec = importlib.util.spec_from_file_location("_mc_tools", str(tools_path))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        # Get enabled tool names once (not per-tool)
+        enabled_names = set(fm.get_enabled_function_names())
+
+        mc_tools = []
+        for tool_def in getattr(mod, 'TOOLS', []):
+            fn = tool_def.get("function", {})
+            name = fn.get("name", "")
+            desc = fn.get("description", "")
+            params = fn.get("parameters", {}).get("properties", {})
+            param_names = list(params.keys())
+
+            mc_tools.append({
+                "name": name,
+                "description": desc,
+                "params": param_names,
+                "enabled": name in enabled_names,
+            })
+
+        # Current toolset info
+        toolset_info = fm.get_current_toolset_info()
+
+        return {
+            "tools": mc_tools,
+            "toolset": toolset_info,
+        }
+    except Exception as e:
+        logger.error(f"get_tool_status error: {e}")
+        return {"tools": [], "error": str(e)}
