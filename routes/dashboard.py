@@ -1084,3 +1084,146 @@ async def get_tool_status(**kwargs):
     except Exception as e:
         logger.error(f"get_tool_status error: {e}")
         return {"tools": [], "error": str(e)}
+
+
+# ─── Calendar Events ───────────────────────────────────────────────────────
+
+async def get_calendar_events(**kwargs):
+    """Get calendar events for a date range, plus goal/note timeline data."""
+    query = kwargs.get("query", {})
+    scope = query.get("scope", "default")
+    start = query.get("start")  # YYYY-MM-DD
+    end = query.get("end")      # YYYY-MM-DD
+    try:
+        plugin = _load_reflection()
+
+        # Custom calendar events
+        events = plugin.get_calendar_events(scope=scope, start=start, end=end)
+
+        # Also gather goals with dates for the calendar
+        goal_events = []
+        if start and end:
+            db = _goals_db()
+            conn = sqlite3.connect(str(db), timeout=5)
+            conn.row_factory = sqlite3.Row
+
+            # Goals created in range
+            rows = conn.execute(
+                "SELECT id, title, status, priority, created_at, completed_at FROM goals WHERE created_at >= ? AND created_at <= ? ORDER BY created_at",
+                (start, end + " 23:59:59")
+            ).fetchall()
+            for r in rows:
+                goal_events.append({
+                    "id": f"goal-{r['id']}",
+                    "title": r["title"],
+                    "start_date": r["created_at"][:10] if r["created_at"] else start,
+                    "end_date": r["created_at"][:10] if r["created_at"] else start,
+                    "category": "goal",
+                    "color": {"high": "#f44336", "medium": "#ff9800", "low": "#4caf50"}.get(r["priority"], "#4a9eff"),
+                    "status": r["status"],
+                    "_source": "goal",
+                })
+
+            # Goals completed in range
+            rows = conn.execute(
+                "SELECT id, title, status, priority, completed_at FROM goals WHERE completed_at IS NOT NULL AND completed_at >= ? AND completed_at <= ?",
+                (start, end + " 23:59:59")
+            ).fetchall()
+            for r in rows:
+                goal_events.append({
+                    "id": f"goal-done-{r['id']}",
+                    "title": f"✅ {r['title']}",
+                    "start_date": r["completed_at"][:10],
+                    "end_date": r["completed_at"][:10],
+                    "category": "completed",
+                    "color": "#4caf50",
+                    "_source": "goal_completed",
+                })
+
+            # Notes created in range
+            try:
+                rows = conn.execute(
+                    "SELECT id, title, created_at FROM notes WHERE created_at >= ? AND created_at <= ? ORDER BY created_at",
+                    (start, end + " 23:59:59")
+                ).fetchall()
+                for r in rows:
+                    goal_events.append({
+                        "id": f"note-{r['id']}",
+                        "title": f"📝 {r['title']}",
+                        "start_date": r["created_at"][:10] if r["created_at"] else start,
+                        "end_date": r["created_at"][:10] if r["created_at"] else start,
+                        "category": "note",
+                        "color": "#9c27b0",
+                        "_source": "note",
+                    })
+            except Exception:
+                pass  # Notes table might not exist
+
+            conn.close()
+
+        return {
+            "events": events,
+            "timeline": goal_events,
+        }
+    except Exception as e:
+        logger.error(f"get_calendar_events error: {e}")
+        return {"events": [], "timeline": [], "error": str(e)}
+
+
+async def create_calendar_event(**kwargs):
+    """Create a calendar event."""
+    body = kwargs.get("body", {})
+    title = body.get("title", "").strip()
+    start_date = body.get("start_date", "").strip()
+    if not title or not start_date:
+        return {"error": "title and start_date are required"}
+    try:
+        plugin = _load_reflection()
+        eid = plugin.save_calendar_event(
+            title=title,
+            start_date=start_date,
+            end_date=body.get("end_date", start_date),
+            description=body.get("description", ""),
+            all_day=body.get("all_day", 1),
+            color=body.get("color", "#4a9eff"),
+            category=body.get("category", "event"),
+            scope=body.get("scope", "default"),
+        )
+        return {"success": True, "id": eid}
+    except Exception as e:
+        logger.error(f"create_calendar_event error: {e}")
+        return {"error": str(e)}
+
+
+async def update_calendar_event(**kwargs):
+    """Update a calendar event."""
+    body = kwargs.get("body", {})
+    eid = body.get("id")
+    if not eid:
+        return {"error": "id is required"}
+    try:
+        plugin = _load_reflection()
+        fields = {}
+        for k in ("title", "description", "start_date", "end_date", "all_day", "color", "category"):
+            if k in body:
+                fields[k] = body[k]
+        ok = plugin.update_calendar_event(eid, **fields)
+        return {"success": ok}
+    except Exception as e:
+        logger.error(f"update_calendar_event error: {e}")
+        return {"error": str(e)}
+
+
+async def delete_calendar_event(**kwargs):
+    """Delete a calendar event."""
+    body = kwargs.get("body", {})
+    eid = body.get("id")
+    if not eid:
+        return {"error": "id is required"}
+    try:
+        plugin = _load_reflection()
+        ok = plugin.delete_calendar_event(eid)
+        return {"success": ok}
+    except Exception as e:
+        logger.error(f"delete_calendar_event error: {e}")
+        return {"error": str(e)}

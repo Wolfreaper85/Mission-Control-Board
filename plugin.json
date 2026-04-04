@@ -270,6 +270,26 @@
                 "method": "GET",
                 "path": "tools/status",
                 "handler": "routes/dashboard.py:get_tool_status"
+            },
+            {
+                "method": "GET",
+                "path": "calendar/events",
+                "handler": "routes/dashboard.py:get_calendar_events"
+            },
+            {
+                "method": "POST",
+                "path": "calendar/create",
+                "handler": "routes/dashboard.py:create_calendar_event"
+            },
+            {
+                "method": "POST",
+                "path": "calendar/update",
+                "handler": "routes/dashboard.py:update_calendar_event"
+            },
+            {
+                "method": "POST",
+                "path": "calendar/delete",
+                "handler": "routes/dashboard.py:delete_calendar_event"
             }
         ]
     }

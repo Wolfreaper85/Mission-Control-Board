@@ -101,6 +101,12 @@ let _seenBulletinPending = 0;
 let _seenReflectionTotal = 0;
 let _toolHealthDismissed = false;  // User dismissed the tool health warning this session
 
+// Calendar state
+let _calendarYear = new Date().getFullYear();
+let _calendarMonth = new Date().getMonth(); // 0-indexed
+let _calendarEvents = [];
+let _calendarTimeline = [];
+
 // Launcher state
 let _launcherCards = []; // discovered plugins
 let _launcherOrder = []; // saved card order
@@ -880,6 +886,21 @@ function _buildLayout() {
                 </div>
             </div>
 
+            <!-- Full Calendar -->
+            <div class="mc-fullcal-section" id="mc-fullcal-section">
+                <div class="mc-board-header">
+                    <h2 class="mc-section-title">\u{1F4C6} Calendar</h2>
+                    <div class="mc-fullcal-controls">
+                        <button class="mc-btn mc-btn-sm" id="mc-cal-prev">\u{276E}</button>
+                        <span class="mc-fullcal-title" id="mc-cal-title"></span>
+                        <button class="mc-btn mc-btn-sm" id="mc-cal-next">\u{276F}</button>
+                        <button class="mc-btn mc-btn-sm mc-cal-today-btn" id="mc-cal-today-btn">Today</button>
+                        <button class="mc-btn mc-btn-accent mc-btn-sm" id="mc-cal-add-event">\u{2795} Event</button>
+                    </div>
+                </div>
+                <div class="mc-fullcal-grid" id="mc-fullcal-grid"></div>
+            </div>
+
             <!-- Pixel Art Workshop — 16-bit Canvas with image backgrounds -->
             <div class="mc-pixel-section" id="mc-pixel-section">
                 <div class="mc-pixel-header">
@@ -1120,6 +1141,61 @@ function _buildLayout() {
         </div>
     </div>
 
+    <!-- Calendar Event Modal -->
+    <div class="mc-modal-overlay" id="mc-event-modal" style="display:none">
+        <div class="mc-modal mc-event-modal-inner">
+            <div class="mc-modal-header">
+                <h3 id="mc-event-modal-title">\u{1F4C6} New Event</h3>
+                <button class="mc-modal-close" id="mc-event-close">\u{2715}</button>
+            </div>
+            <div class="mc-modal-body">
+                <label class="mc-label">Title</label>
+                <input type="text" class="mc-input" id="mc-event-title" maxlength="200" placeholder="Event title...">
+                <label class="mc-label">Description</label>
+                <textarea class="mc-input mc-textarea" id="mc-event-desc" maxlength="500" placeholder="Optional details..."></textarea>
+                <div class="mc-event-row">
+                    <div class="mc-event-field">
+                        <label class="mc-label">Start Date</label>
+                        <input type="date" class="mc-input" id="mc-event-start">
+                    </div>
+                    <div class="mc-event-field">
+                        <label class="mc-label">End Date</label>
+                        <input type="date" class="mc-input" id="mc-event-end">
+                    </div>
+                </div>
+                <div class="mc-event-row">
+                    <div class="mc-event-field">
+                        <label class="mc-label">Color</label>
+                        <div class="mc-event-colors" id="mc-event-colors">
+                            <span class="mc-event-color-opt mc-event-color-sel" data-color="#4a9eff" style="background:#4a9eff" title="Blue"></span>
+                            <span class="mc-event-color-opt" data-color="#f44336" style="background:#f44336" title="Red"></span>
+                            <span class="mc-event-color-opt" data-color="#ff9800" style="background:#ff9800" title="Orange"></span>
+                            <span class="mc-event-color-opt" data-color="#4caf50" style="background:#4caf50" title="Green"></span>
+                            <span class="mc-event-color-opt" data-color="#9c27b0" style="background:#9c27b0" title="Purple"></span>
+                            <span class="mc-event-color-opt" data-color="#e91e63" style="background:#e91e63" title="Pink"></span>
+                            <span class="mc-event-color-opt" data-color="#00bcd4" style="background:#00bcd4" title="Cyan"></span>
+                            <span class="mc-event-color-opt" data-color="#ffeb3b" style="background:#ffeb3b" title="Yellow"></span>
+                        </div>
+                    </div>
+                    <div class="mc-event-field">
+                        <label class="mc-label">Category</label>
+                        <select class="mc-input" id="mc-event-category">
+                            <option value="event">Event</option>
+                            <option value="deadline">Deadline</option>
+                            <option value="reminder">Reminder</option>
+                            <option value="milestone">Milestone</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="mc-modal-footer">
+                <button class="mc-btn mc-btn-danger" id="mc-event-delete" style="display:none;margin-right:auto">\u{1F5D1}\u{FE0F} Delete</button>
+                <button class="mc-btn" id="mc-event-cancel">Cancel</button>
+                <button class="mc-btn mc-btn-accent" id="mc-event-save">\u{1F4C6} Save Event</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Guide Overlay -->
     <div class="mc-overlay" id="mc-guide-overlay" style="display:none">
         <div class="mc-overlay-panel mc-overlay-wide mc-guide-panel">
@@ -1308,6 +1384,25 @@ function _bindEvents(el) {
         btn.addEventListener('click', () => {
             btn.classList.toggle('mc-day-active');
             _updateSchedPreview();
+        });
+    });
+
+    // Calendar controls
+    el.querySelector('#mc-cal-prev').addEventListener('click', () => { _calendarMonth--; if (_calendarMonth < 0) { _calendarMonth = 11; _calendarYear--; } _loadCalendarEvents(); });
+    el.querySelector('#mc-cal-next').addEventListener('click', () => { _calendarMonth++; if (_calendarMonth > 11) { _calendarMonth = 0; _calendarYear++; } _loadCalendarEvents(); });
+    el.querySelector('#mc-cal-today-btn').addEventListener('click', () => { _calendarYear = new Date().getFullYear(); _calendarMonth = new Date().getMonth(); _loadCalendarEvents(); });
+    el.querySelector('#mc-cal-add-event').addEventListener('click', () => _showEventModal());
+
+    // Calendar event modal
+    el.querySelector('#mc-event-close').addEventListener('click', () => _hideEventModal());
+    el.querySelector('#mc-event-cancel').addEventListener('click', () => _hideEventModal());
+    el.querySelector('#mc-event-save').addEventListener('click', () => _saveCalendarEvent());
+    el.querySelector('#mc-event-delete').addEventListener('click', () => _deleteCalendarEvent());
+    el.querySelector('#mc-event-modal').addEventListener('click', e => { if (e.target.id === 'mc-event-modal') _hideEventModal(); });
+    el.querySelectorAll('.mc-event-color-opt').forEach(opt => {
+        opt.addEventListener('click', () => {
+            el.querySelectorAll('.mc-event-color-opt').forEach(o => o.classList.remove('mc-event-color-sel'));
+            opt.classList.add('mc-event-color-sel');
         });
     });
 
@@ -2138,6 +2233,7 @@ function _loadAll() {
         if (!window._mcReflectionInit) { window._mcReflectionInit = true; _initReflection(); }
         else { _loadReflectionData(); }
     } catch(e) { console.error('[MC] Reflection error:', e); }
+    try { _loadCalendarEvents(); } catch(e) { console.error('[MC] Calendar error:', e); }
 }
 
 async function _checkScheduleStamps() {
@@ -2905,7 +3001,7 @@ function _initNotes() {
     }
 }
 
-// ─── Self-Reflection ────────────────────────────────────────────────────────
+// ─── Self-Reflection & Tool Status ─────────────────────────────────────────
 
 // ─── Tool Status ────────────────────────────────────────────────────────────
 
@@ -2965,6 +3061,233 @@ async function _loadToolStatus() {
     } catch (e) {
         listEl.innerHTML = '<div class="mc-empty">Failed to load tool status.</div>';
         console.error('[MC] Tool status error:', e);
+    }
+}
+
+// ─── Calendar ──────────────────────────────────────────────────────────────
+
+let _editingEventId = null;
+
+async function _loadCalendarEvents() {
+    const y = _calendarYear;
+    const m = _calendarMonth;
+    const start = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+    const lastDay = new Date(y, m + 1, 0).getDate();
+    const end = `${y}-${String(m + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+    // Update title
+    const titleEl = document.getElementById('mc-cal-title');
+    if (titleEl) {
+        const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        titleEl.textContent = `${monthNames[m]} ${y}`;
+    }
+
+    try {
+        const scope = _selectedMemoryScope || 'default';
+        const resp = await fetch(`/api/plugin/mission-control/calendar/events?scope=${encodeURIComponent(scope)}&start=${start}&end=${end}`, {
+            headers: { 'X-CSRF-Token': CSRF() }
+        });
+        const data = await resp.json();
+        _calendarEvents = data.events || [];
+        _calendarTimeline = data.timeline || [];
+        _renderFullCalendar();
+    } catch (e) {
+        console.error('[MC] Calendar load error:', e);
+    }
+}
+
+function _renderFullCalendar() {
+    const grid = document.getElementById('mc-fullcal-grid');
+    if (!grid) return;
+
+    const y = _calendarYear;
+    const m = _calendarMonth;
+    const firstDay = new Date(y, m, 1).getDay(); // 0=Sun
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const today = new Date();
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+    // Combine all events
+    const allEvents = [
+        ..._calendarEvents.map(e => ({ ...e, _source: 'custom' })),
+        ..._calendarTimeline,
+    ];
+
+    // Index events by date
+    const byDate = {};
+    for (const ev of allEvents) {
+        const d = (ev.start_date || '').substring(0, 10);
+        if (!d) continue;
+        if (!byDate[d]) byDate[d] = [];
+        byDate[d].push(ev);
+    }
+
+    const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    let html = '<div class="mc-fullcal-header-row">';
+    for (const dl of dayLabels) {
+        html += `<div class="mc-fullcal-day-header">${dl}</div>`;
+    }
+    html += '</div><div class="mc-fullcal-body">';
+
+    // Leading blank days
+    for (let i = 0; i < firstDay; i++) {
+        html += '<div class="mc-fullcal-cell mc-fullcal-empty"></div>';
+    }
+
+    for (let d = 1; d <= daysInMonth; d++) {
+        const dateStr = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const isToday = dateStr === todayStr;
+        const dayEvents = byDate[dateStr] || [];
+
+        html += `<div class="mc-fullcal-cell${isToday ? ' mc-fullcal-today' : ''}" data-date="${dateStr}">`;
+        html += `<div class="mc-fullcal-date${isToday ? ' mc-fullcal-date-today' : ''}">${d}</div>`;
+
+        const visible = dayEvents.slice(0, 3);
+        const extra = dayEvents.length - 3;
+
+        for (const ev of visible) {
+            const color = ev.color || '#4a9eff';
+            const isCustom = ev._source === 'custom';
+            const clickAttr = isCustom ? `data-event-id="${ev.id}"` : '';
+            const catIcon = _calCatIcon(ev.category || ev._source || 'event');
+            html += `<div class="mc-fullcal-event" style="border-left:3px solid ${color};background:${color}15" ${clickAttr}>`;
+            html += `<span class="mc-fullcal-event-icon">${catIcon}</span>`;
+            html += `<span class="mc-fullcal-event-title">${_esc(ev.title)}</span>`;
+            html += '</div>';
+        }
+        if (extra > 0) {
+            html += `<div class="mc-fullcal-more">+${extra} more</div>`;
+        }
+
+        html += '</div>';
+    }
+
+    // Trailing blanks
+    const totalCells = firstDay + daysInMonth;
+    const trailing = (7 - (totalCells % 7)) % 7;
+    for (let i = 0; i < trailing; i++) {
+        html += '<div class="mc-fullcal-cell mc-fullcal-empty"></div>';
+    }
+
+    html += '</div>';
+    grid.innerHTML = html;
+
+    // Bind click events
+    grid.querySelectorAll('.mc-fullcal-cell[data-date]').forEach(cell => {
+        cell.addEventListener('click', e => {
+            const evEl = e.target.closest('[data-event-id]');
+            if (evEl) {
+                const eid = parseInt(evEl.dataset.eventId);
+                const ev = _calendarEvents.find(x => x.id === eid);
+                if (ev) { _showEventModal(ev); return; }
+            }
+            _showEventModal(null, cell.dataset.date);
+        });
+    });
+}
+
+function _calCatIcon(cat) {
+    const icons = {
+        'event': '\u{1F4C6}', 'deadline': '\u{23F0}', 'reminder': '\u{1F514}',
+        'milestone': '\u{1F3C6}', 'goal': '\u{1F3AF}', 'completed': '\u{2705}',
+        'goal_completed': '\u{2705}', 'note': '\u{1F4DD}',
+    };
+    return icons[cat] || '\u{1F4C6}';
+}
+
+function _showEventModal(event = null, date = null) {
+    const modal = document.getElementById('mc-event-modal');
+    const titleInput = document.getElementById('mc-event-title');
+    const descInput = document.getElementById('mc-event-desc');
+    const startInput = document.getElementById('mc-event-start');
+    const endInput = document.getElementById('mc-event-end');
+    const catInput = document.getElementById('mc-event-category');
+    const deleteBtn = document.getElementById('mc-event-delete');
+    const modalTitle = document.getElementById('mc-event-modal-title');
+
+    if (event) {
+        _editingEventId = event.id;
+        modalTitle.textContent = '\u{270F}\u{FE0F} Edit Event';
+        titleInput.value = event.title || '';
+        descInput.value = event.description || '';
+        startInput.value = (event.start_date || '').substring(0, 10);
+        endInput.value = (event.end_date || '').substring(0, 10);
+        catInput.value = event.category || 'event';
+        deleteBtn.style.display = '';
+        const color = event.color || '#4a9eff';
+        document.querySelectorAll('.mc-event-color-opt').forEach(o => {
+            o.classList.toggle('mc-event-color-sel', o.dataset.color === color);
+        });
+    } else {
+        _editingEventId = null;
+        modalTitle.textContent = '\u{1F4C6} New Event';
+        titleInput.value = '';
+        descInput.value = '';
+        startInput.value = date || new Date().toISOString().substring(0, 10);
+        endInput.value = date || new Date().toISOString().substring(0, 10);
+        catInput.value = 'event';
+        deleteBtn.style.display = 'none';
+        document.querySelectorAll('.mc-event-color-opt').forEach(o => {
+            o.classList.toggle('mc-event-color-sel', o.dataset.color === '#4a9eff');
+        });
+    }
+
+    modal.style.display = 'flex';
+    titleInput.focus();
+}
+
+function _hideEventModal() {
+    document.getElementById('mc-event-modal').style.display = 'none';
+    _editingEventId = null;
+}
+
+async function _saveCalendarEvent() {
+    const title = document.getElementById('mc-event-title').value.trim();
+    const description = document.getElementById('mc-event-desc').value.trim();
+    const start_date = document.getElementById('mc-event-start').value;
+    const end_date = document.getElementById('mc-event-end').value;
+    const category = document.getElementById('mc-event-category').value;
+    const colorEl = document.querySelector('.mc-event-color-opt.mc-event-color-sel');
+    const color = colorEl ? colorEl.dataset.color : '#4a9eff';
+
+    if (!title || !start_date) return;
+
+    const scope = _selectedMemoryScope || 'default';
+
+    try {
+        if (_editingEventId) {
+            await fetch('/api/plugin/mission-control/calendar/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                body: JSON.stringify({ id: _editingEventId, title, description, start_date, end_date: end_date || start_date, color, category })
+            });
+        } else {
+            await fetch('/api/plugin/mission-control/calendar/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+                body: JSON.stringify({ title, description, start_date, end_date: end_date || start_date, color, category, scope })
+            });
+        }
+        _hideEventModal();
+        _loadCalendarEvents();
+    } catch (e) {
+        console.error('[MC] Save event error:', e);
+    }
+}
+
+async function _deleteCalendarEvent() {
+    if (!_editingEventId) return;
+    if (!confirm('Delete this event?')) return;
+    try {
+        await fetch('/api/plugin/mission-control/calendar/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF() },
+            body: JSON.stringify({ id: _editingEventId })
+        });
+        _hideEventModal();
+        _loadCalendarEvents();
+    } catch (e) {
+        console.error('[MC] Delete event error:', e);
     }
 }
 
@@ -6908,6 +7231,101 @@ select.mc-input { cursor: pointer; }
     color: #aaa; padding: 2px 8px; border-radius: 4px; font-family: monospace;
 }
 .mc-tool-param-none { color: #555; font-style: italic; }
+
+/* ─── Full Calendar ─── */
+.mc-fullcal-section {
+    background: #111118; border: 1px solid #1a1a24; border-radius: 10px;
+    padding: 16px 20px; margin-top: 16px;
+}
+.mc-fullcal-controls {
+    display: flex; align-items: center; gap: 8px;
+}
+.mc-fullcal-title {
+    font-size: 1rem; font-weight: 700; color: #e0e0e0;
+    min-width: 160px; text-align: center;
+}
+.mc-cal-today-btn {
+    margin-left: 4px; font-size: 0.72rem !important;
+    padding: 4px 10px !important;
+}
+.mc-btn-sm {
+    font-size: 0.78rem; padding: 4px 10px; min-width: auto;
+}
+.mc-fullcal-header-row {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
+    margin-bottom: 2px;
+}
+.mc-fullcal-day-header {
+    font-size: 0.7rem; font-weight: 700; color: #666;
+    text-transform: uppercase; text-align: center;
+    padding: 6px 0; border-bottom: 1px solid #1a1a24;
+}
+.mc-fullcal-body {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
+}
+.mc-fullcal-cell {
+    background: #0d0d14; border: 1px solid #1a1a24; border-radius: 6px;
+    min-height: 90px; padding: 4px 5px; cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    overflow: hidden;
+}
+.mc-fullcal-cell:hover { border-color: #333; background: #0f0f18; }
+.mc-fullcal-empty {
+    background: transparent; border-color: transparent;
+    cursor: default; min-height: 90px;
+}
+.mc-fullcal-empty:hover { border-color: transparent; background: transparent; }
+.mc-fullcal-today {
+    border-color: #4a9eff !important;
+    box-shadow: 0 0 10px rgba(74,158,255,0.12);
+}
+.mc-fullcal-date {
+    font-size: 0.72rem; font-weight: 600; color: #555;
+    margin-bottom: 3px; padding: 1px 4px;
+}
+.mc-fullcal-date-today {
+    color: #fff; background: #4a9eff; border-radius: 50%;
+    width: 22px; height: 22px; display: flex; align-items: center;
+    justify-content: center; font-size: 0.68rem;
+}
+.mc-fullcal-event {
+    border-radius: 4px; padding: 2px 4px; margin-bottom: 2px;
+    display: flex; align-items: center; gap: 3px;
+    cursor: pointer; transition: opacity 0.15s;
+    overflow: hidden;
+}
+.mc-fullcal-event:hover { opacity: 0.8; }
+.mc-fullcal-event-icon { font-size: 0.6rem; flex-shrink: 0; }
+.mc-fullcal-event-title {
+    font-size: 0.6rem; color: #ccc; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mc-fullcal-more {
+    font-size: 0.58rem; color: #4a9eff; padding: 1px 4px;
+    cursor: pointer; font-weight: 600;
+}
+
+/* Calendar Event Modal */
+.mc-event-modal-inner { max-width: 480px; }
+.mc-event-row { display: flex; gap: 12px; margin-top: 4px; }
+.mc-event-field { flex: 1; }
+.mc-event-colors { display: flex; gap: 6px; margin-top: 4px; flex-wrap: wrap; }
+.mc-event-color-opt {
+    width: 26px; height: 26px; border-radius: 50%; cursor: pointer;
+    border: 2px solid transparent; transition: border-color 0.15s, transform 0.15s;
+}
+.mc-event-color-opt:hover { transform: scale(1.15); }
+.mc-event-color-opt.mc-event-color-sel {
+    border-color: #fff; transform: scale(1.15);
+    box-shadow: 0 0 8px rgba(255,255,255,0.2);
+}
+
+@media (max-width: 768px) {
+    .mc-fullcal-cell { min-height: 65px; }
+    .mc-fullcal-event-title { font-size: 0.55rem; }
+    .mc-fullcal-date { font-size: 0.65rem; }
+    .mc-event-row { flex-direction: column; gap: 6px; }
+}
 `;
     document.head.appendChild(style);
 }

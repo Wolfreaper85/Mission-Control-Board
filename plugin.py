@@ -138,6 +138,24 @@ def ensure_tables():
         conn.execute('CREATE INDEX IF NOT EXISTS idx_capsules_scope ON capsules(scope)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_capsules_type ON capsules(problem_type)')
 
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS calendar_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
+                start_date TEXT NOT NULL,
+                end_date TEXT,
+                all_day INTEGER DEFAULT 1,
+                color TEXT DEFAULT '#4a9eff',
+                category TEXT DEFAULT 'event',
+                scope TEXT NOT NULL DEFAULT 'default',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_calendar_scope ON calendar_events(scope)')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_calendar_start ON calendar_events(start_date)')
+
         conn.commit()
         conn.close()
         _tables_created = True
@@ -731,3 +749,85 @@ def get_reflection_stats(scope="default"):
     except Exception as e:
         logger.error(f"Self-Reflection: get_reflection_stats error: {e}")
         return {"corrections": 0, "reflections": 0, "rules_active": 0, "rules_total": 0, "bulletins_pending": 0, "capsules": 0}
+
+
+# ─── Calendar Events ────────────────────────────────────────────────────────
+
+def save_calendar_event(title, start_date, end_date=None, description="", all_day=1, color="#4a9eff", category="event", scope="default"):
+    """Save a calendar event."""
+    if not ensure_tables():
+        return None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO calendar_events (title, description, start_date, end_date, all_day, color, category, scope) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (title[:500], description[:2000] if description else "", start_date, end_date or start_date, all_day, color, category, scope)
+        )
+        conn.commit()
+        eid = cursor.lastrowid
+        conn.close()
+        return eid
+    except Exception as e:
+        logger.error(f"Calendar: save_event error: {e}")
+        return None
+
+
+def get_calendar_events(scope="default", start=None, end=None):
+    """Get calendar events, optionally filtered by date range."""
+    if not ensure_tables():
+        return []
+    try:
+        conn = get_connection()
+        if start and end:
+            rows = conn.execute(
+                "SELECT * FROM calendar_events WHERE scope IN (?, 'global') AND start_date <= ? AND (end_date >= ? OR end_date IS NULL) ORDER BY start_date",
+                (scope, end, start)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM calendar_events WHERE scope IN (?, 'global') ORDER BY start_date DESC LIMIT 200",
+                (scope,)
+            ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Calendar: get_events error: {e}")
+        return []
+
+
+def update_calendar_event(event_id, **fields):
+    """Update a calendar event."""
+    if not ensure_tables():
+        return False
+    allowed = {"title", "description", "start_date", "end_date", "all_day", "color", "category"}
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return False
+    try:
+        updates["updated_at"] = datetime.now().isoformat()
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values()) + [event_id]
+        conn = get_connection()
+        conn.execute(f"UPDATE calendar_events SET {set_clause} WHERE id = ?", values)
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Calendar: update_event error: {e}")
+        return False
+
+
+def delete_calendar_event(event_id):
+    """Delete a calendar event."""
+    if not ensure_tables():
+        return False
+    try:
+        conn = get_connection()
+        conn.execute("DELETE FROM calendar_events WHERE id = ?", (event_id,))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Calendar: delete_event error: {e}")
+        return False
