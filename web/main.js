@@ -3107,10 +3107,18 @@ async function _checkReminders() {
     }
 }
 
+function _to12h(time24) {
+    if (!time24) return '';
+    const [h, m] = time24.split(':').map(Number);
+    const period = h >= 12 ? 'PM' : 'AM';
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
 function _fireReminder(event) {
     const title = event.title || 'Calendar Event';
-    const time = event.start_time || '';
-    const timeStr = time ? ` at ${time}` : '';
+    const time12 = _to12h(event.start_time);
+    const timeStr = time12 ? ` at ${time12}` : '';
 
     // Play alarm sound
     _playAlarmSound();
@@ -3188,14 +3196,7 @@ function _showReminderToast(title, timeStr, color) {
         <button style="background:none;border:none;color:#666;cursor:pointer;font-size:1rem;padding:0 2px;flex-shrink:0" onclick="this.parentElement.remove()">\u{2715}</button>
     `;
     container.appendChild(toast);
-
-    // Auto-dismiss after 10 seconds
-    setTimeout(() => {
-        if (toast.parentElement) {
-            toast.style.animation = 'mc-toast-out 0.3s ease-in forwards';
-            setTimeout(() => toast.remove(), 300);
-        }
-    }, 10000);
+    // Toast stays visible until user clicks ✕ — no auto-dismiss
 }
 
 async function _loadCalendarEvents() {
