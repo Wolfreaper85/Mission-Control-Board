@@ -154,6 +154,7 @@ def ensure_tables():
                 category TEXT DEFAULT 'event',
                 reminder_minutes INTEGER,
                 reminded INTEGER DEFAULT 0,
+                chime_count INTEGER DEFAULT 3,
                 scope TEXT NOT NULL DEFAULT 'default',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -183,6 +184,7 @@ def _run_calendar_migration():
             ("start_time", "TEXT", "NULL"),
             ("reminder_minutes", "INTEGER", "NULL"),
             ("reminded", "INTEGER", "0"),
+            ("chime_count", "INTEGER", "3"),
         ]:
             try:
                 conn.execute(f'ALTER TABLE calendar_events ADD COLUMN {col} {coltype} DEFAULT {default}')
@@ -784,7 +786,7 @@ def get_reflection_stats(scope="default"):
 
 # ─── Calendar Events ────────────────────────────────────────────────────────
 
-def save_calendar_event(title, start_date, end_date=None, description="", all_day=1, color="#4a9eff", category="event", scope="default", start_time=None, reminder_minutes=None):
+def save_calendar_event(title, start_date, end_date=None, description="", all_day=1, color="#4a9eff", category="event", scope="default", start_time=None, reminder_minutes=None, chime_count=3):
     """Save a calendar event."""
     if not ensure_tables():
         return None
@@ -792,8 +794,8 @@ def save_calendar_event(title, start_date, end_date=None, description="", all_da
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO calendar_events (title, description, start_date, end_date, start_time, all_day, color, category, scope, reminder_minutes, reminded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)",
-            (title[:500], description[:2000] if description else "", start_date, end_date or start_date, start_time, all_day, color, category, scope, reminder_minutes)
+            "INSERT INTO calendar_events (title, description, start_date, end_date, start_time, all_day, color, category, scope, reminder_minutes, reminded, chime_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+            (title[:500], description[:2000] if description else "", start_date, end_date or start_date, start_time, all_day, color, category, scope, reminder_minutes, chime_count)
         )
         conn.commit()
         eid = cursor.lastrowid
@@ -831,7 +833,7 @@ def update_calendar_event(event_id, **fields):
     """Update a calendar event."""
     if not ensure_tables():
         return False
-    allowed = {"title", "description", "start_date", "end_date", "start_time", "all_day", "color", "category", "reminder_minutes", "reminded"}
+    allowed = {"title", "description", "start_date", "end_date", "start_time", "all_day", "color", "category", "reminder_minutes", "reminded", "chime_count"}
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return False

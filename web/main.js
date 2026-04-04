@@ -21,7 +21,7 @@ export default {
             show: () => _onShowDashboard(),
             hide: () => _onHideDashboard(),
         });
-        _registerServiceWorker();
+        _unregisterServiceWorker(); // Clean up any old SW
     }
 };
 
@@ -109,8 +109,6 @@ let _calendarEvents = [];
 let _calendarTimeline = [];
 
 // Service Worker state
-let _swRegistration = null;
-
 // Launcher state
 let _launcherCards = []; // discovered plugins
 let _launcherOrder = []; // saved card order
@@ -1187,6 +1185,18 @@ function _buildLayout() {
                 </div>
                 <div class="mc-event-row">
                     <div class="mc-event-field">
+                        <label class="mc-label">\u{1F50A} Chimes</label>
+                        <select class="mc-input" id="mc-event-chimes">
+                            <option value="1">1 chime</option>
+                            <option value="2">2 chimes</option>
+                            <option value="3" selected>3 chimes</option>
+                            <option value="5">5 chimes</option>
+                            <option value="10">10 chimes</option>
+                            <option value="-1">Repeat until dismissed</option>
+                        </select>
+                    </div>
+                <div class="mc-event-row">
+                    <div class="mc-event-field">
                         <label class="mc-label">Color</label>
                         <div class="mc-event-colors" id="mc-event-colors">
                             <span class="mc-event-color-opt mc-event-color-sel" data-color="#4a9eff" style="background:#4a9eff" title="Blue"></span>
@@ -1631,6 +1641,10 @@ function _startDashboardPolling() {
     _loadAll();
     _loadChatHistory();
     _loadActivePersona();
+    // Retry calendar load in case the first attempt failed during startup
+    // (routes not ready yet or rate-limited). Two retries at 3s and 8s.
+    setTimeout(() => { if (!_calendarEvents.length) _loadCalendarEvents(); }, 3000);
+    setTimeout(() => { if (!_calendarEvents.length) _loadCalendarEvents(); }, 8000);
     _refreshInterval = setInterval(async () => {
         _loadStats();
         _loadAgents();
@@ -1647,7 +1661,7 @@ function _startDashboardPolling() {
                 if (sched && sched.schedule) el.textContent = _getCountdown(sched.schedule);
             });
         }
-    }, 10000);
+    }, 30000);
     // Reminder polling — check every 30 seconds
     if (window._mcReminderInterval) clearInterval(window._mcReminderInterval);
     window._mcReminderInterval = setInterval(_checkReminders, 30000);
@@ -3092,60 +3106,16 @@ async function _loadToolStatus() {
 
 // ─── Service Worker ────────────────────────────────────────────────────────
 
-async function _registerServiceWorker() {
-    if (!('serviceWorker' in navigator)) {
-        console.log('[MC] Service Workers not supported — reminders only work in active tab');
-        return;
-    }
-
-    try {
-        // Request notification permission early
-        if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-            Notification.requestPermission();
-        }
-
-        const swUrl = '/plugin-web/mission-control/sw-reminders.js';
-        const reg = await navigator.serviceWorker.register(swUrl, { scope: '/plugin-web/mission-control/' });
-        _swRegistration = reg;
-
-        // Wait for the SW to be ready
-        await navigator.serviceWorker.ready;
-
-        // Send init message with base URL and CSRF
-        const baseUrl = window.location.origin;
-        _sendSwMessage({ type: 'init', baseUrl, csrf: CSRF() });
-
-        // Listen for messages from the SW
-        navigator.serviceWorker.addEventListener('message', (e) => {
-            const msg = e.data;
-            if (msg.type === 'mc-reminder-fire') {
-                // SW detected a due reminder — play chime + show toast
-                const event = msg.event;
-                const time12 = _to12h(event.start_time);
-                const timeStr = time12 ? ` at ${time12}` : '';
-                _playAlarmSound();
-                _showReminderToast(event.title || 'Calendar Event', timeStr, event.color || '#4a9eff');
-            }
-            if (msg.type === 'mc-reminder-click') {
-                // User clicked a notification — switch to Mission Control
-                switchView('mission-control');
+function _unregisterServiceWorker() {
+    // Clean up any previously registered SW
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(regs => {
+            for (const reg of regs) {
+                if (reg.scope && reg.scope.includes('mission-control')) {
+                    reg.unregister();
+                }
             }
         });
-
-        // Keep CSRF token updated (it can rotate)
-        setInterval(() => _sendSwMessage({ type: 'update-csrf', csrf: CSRF() }), 60000);
-
-        console.log('[MC] Service Worker registered — background reminders active');
-    } catch (e) {
-        console.warn('[MC] Service Worker registration failed:', e);
-    }
-}
-
-function _sendSwMessage(msg) {
-    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-        navigator.serviceWorker.controller.postMessage(msg);
-    } else if (_swRegistration && _swRegistration.active) {
-        _swRegistration.active.postMessage(msg);
     }
 }
 
@@ -3156,9 +3126,6 @@ let _editingEventId = null;
 // ─── Reminder / Alarm System ───────────────────────────────────────────────
 
 async function _checkReminders() {
-    // If SW is active, it handles polling — skip to avoid duplicates
-    if (_swRegistration && _swRegistration.active) return;
-
     try {
         const resp = await fetch('/api/plugin/mission-control/calendar/reminders', {
             headers: { 'X-CSRF-Token': CSRF() }
@@ -3185,51 +3152,79 @@ function _fireReminder(event) {
     const title = event.title || 'Calendar Event';
     const time12 = _to12h(event.start_time);
     const timeStr = time12 ? ` at ${time12}` : '';
+    const chimes = event.chime_count != null ? event.chime_count : 3;
 
-    // Play alarm sound
-    _playAlarmSound();
+    // Play alarm sound (chimes = -1 means repeat until dismissed)
+    _playAlarmSound(chimes);
 
     // Show in-app toast
     _showReminderToast(title, timeStr, event.color || '#4a9eff');
 
-    // Use SW for notification (handles click-to-focus), fall back to basic Notification API
-    if (_swRegistration && _swRegistration.active) {
-        _swRegistration.showNotification('Mission Control Reminder', {
+    // Show browser notification (Sapphire tab only)
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        new Notification('\ud83d\udd14 Mission Control Reminder', {
             body: `${title}${timeStr}`,
             icon: '/static/favicon.ico',
             tag: `mc-reminder-${event.id}`,
-            data: { eventId: event.id },
             requireInteraction: true,
         });
-    } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-        new Notification('\u{1F514} Mission Control Reminder', {
-            body: `${title}${timeStr}`,
-            icon: '/static/favicon.ico',
-            tag: `mc-reminder-${event.id}`,
-        });
+    } else if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        Notification.requestPermission();
     }
 }
 
-function _playAlarmSound() {
-    try {
-        // Generate a pleasant alarm chime using Web Audio API
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
-        notes.forEach((freq, i) => {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.type = 'sine';
-            osc.frequency.value = freq;
-            gain.gain.setValueAtTime(0, ctx.currentTime + i * 0.15);
-            gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + i * 0.15 + 0.05);
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.15 + 0.4);
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.start(ctx.currentTime + i * 0.15);
-            osc.stop(ctx.currentTime + i * 0.15 + 0.5);
-        });
-    } catch (e) {
-        console.warn('[MC] Audio alarm failed:', e);
+window._alarmLoopTimer = null; // For "repeat until dismissed" mode (on window so inline onclick can access it)
+
+function _playAlarmSound(chimeCount) {
+    // Stop any existing repeating alarm
+    if (window._alarmLoopTimer) { clearInterval(window._alarmLoopTimer); window._alarmLoopTimer = null; }
+
+    const repeats = chimeCount === -1 ? 3 : (chimeCount || 3); // -1 plays 3 per burst, repeating
+
+    function _playChimeBurst() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+            const chimeLen = notes.length * 0.15 + 0.4;
+            const gap = 0.3;
+
+            for (let r = 0; r < repeats; r++) {
+                const offset = r * (chimeLen + gap);
+                notes.forEach((freq, i) => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.value = freq;
+                    const t = ctx.currentTime + offset + i * 0.15;
+                    gain.gain.setValueAtTime(0, t);
+                    gain.gain.linearRampToValueAtTime(0.2, t + 0.05);
+                    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(t);
+                    osc.stop(t + 0.5);
+                });
+            }
+        } catch (e) {
+            console.warn('[MC] Audio alarm failed:', e);
+        }
+    }
+
+    _playChimeBurst();
+
+    // "Repeat until dismissed" — keep playing every few seconds until toast is closed
+    if (chimeCount === -1) {
+        const burstDuration = (3 * (0.6 + 0.3) + 1) * 1000; // ~3.7s per burst + 1s pause
+        window._alarmLoopTimer = setInterval(() => {
+            // Stop if no toast is visible (user dismissed it)
+            const toasts = document.getElementById('mc-reminder-toasts');
+            if (!toasts || !toasts.children.length) {
+                clearInterval(window._alarmLoopTimer);
+                window._alarmLoopTimer = null;
+                return;
+            }
+            _playChimeBurst();
+        }, burstDuration);
     }
 }
 
@@ -3257,7 +3252,7 @@ function _showReminderToast(title, timeStr, color) {
             <div style="font-weight:700;font-size:0.85rem;color:#e0e0e0;margin-bottom:2px">Reminder</div>
             <div style="font-size:0.8rem;color:#ccc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(title)}${timeStr}</div>
         </div>
-        <button style="background:none;border:none;color:#666;cursor:pointer;font-size:1rem;padding:0 2px;flex-shrink:0" onclick="this.parentElement.remove()">\u{2715}</button>
+        <button style="background:none;border:none;color:#666;cursor:pointer;font-size:1rem;padding:0 2px;flex-shrink:0" onclick="this.parentElement.remove(); if(window._alarmLoopTimer){clearInterval(window._alarmLoopTimer);window._alarmLoopTimer=null;}">\u{2715}</button>
     `;
     container.appendChild(toast);
     // Toast stays visible until user clicks ✕ — no auto-dismiss
@@ -3402,6 +3397,7 @@ function _showEventModal(event = null, date = null) {
     const endInput = document.getElementById('mc-event-end');
     const timeInput = document.getElementById('mc-event-time');
     const reminderInput = document.getElementById('mc-event-reminder');
+    const chimesInput = document.getElementById('mc-event-chimes');
     const catInput = document.getElementById('mc-event-category');
     const deleteBtn = document.getElementById('mc-event-delete');
     const modalTitle = document.getElementById('mc-event-modal-title');
@@ -3415,6 +3411,7 @@ function _showEventModal(event = null, date = null) {
         endInput.value = (event.end_date || '').substring(0, 10);
         timeInput.value = event.start_time || '09:00';
         reminderInput.value = event.reminder_minutes != null ? String(event.reminder_minutes) : '';
+        chimesInput.value = event.chime_count != null ? String(event.chime_count) : '3';
         catInput.value = event.category || 'event';
         deleteBtn.style.display = '';
         const color = event.color || '#4a9eff';
@@ -3430,6 +3427,7 @@ function _showEventModal(event = null, date = null) {
         endInput.value = date || new Date().toISOString().substring(0, 10);
         timeInput.value = '09:00';
         reminderInput.value = '';
+        chimesInput.value = '3';
         catInput.value = 'event';
         deleteBtn.style.display = 'none';
         document.querySelectorAll('.mc-event-color-opt').forEach(o => {
@@ -3454,6 +3452,7 @@ async function _saveCalendarEvent() {
     const start_time = document.getElementById('mc-event-time').value || '09:00';
     const reminderVal = document.getElementById('mc-event-reminder').value;
     const reminder_minutes = reminderVal !== '' ? parseInt(reminderVal) : null;
+    const chime_count = parseInt(document.getElementById('mc-event-chimes').value) || 3;
     const category = document.getElementById('mc-event-category').value;
     const colorEl = document.querySelector('.mc-event-color-opt.mc-event-color-sel');
     const color = colorEl ? colorEl.dataset.color : '#4a9eff';
@@ -3461,7 +3460,7 @@ async function _saveCalendarEvent() {
     if (!title || !start_date) return;
 
     const scope = _selectedMemoryScope || 'default';
-    const payload = { title, description, start_date, end_date: end_date || start_date, start_time, reminder_minutes, color, category };
+    const payload = { title, description, start_date, end_date: end_date || start_date, start_time, reminder_minutes, chime_count, color, category };
 
     try {
         if (_editingEventId) {

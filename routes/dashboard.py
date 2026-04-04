@@ -1181,6 +1181,8 @@ async def create_calendar_event(**kwargs):
         plugin = _load_reflection()
         reminder_val = body.get("reminder_minutes")
         reminder_minutes = int(reminder_val) if reminder_val is not None and str(reminder_val) != "" else None
+        chime_val = body.get("chime_count")
+        chime_count = int(chime_val) if chime_val is not None and str(chime_val) != "" else 3
         eid = plugin.save_calendar_event(
             title=title,
             start_date=start_date,
@@ -1192,6 +1194,7 @@ async def create_calendar_event(**kwargs):
             scope=body.get("scope", "default"),
             start_time=body.get("start_time"),
             reminder_minutes=reminder_minutes,
+            chime_count=chime_count,
         )
         return {"success": True, "id": eid}
     except Exception as e:
@@ -1208,7 +1211,7 @@ async def update_calendar_event(**kwargs):
     try:
         plugin = _load_reflection()
         fields = {}
-        for k in ("title", "description", "start_date", "end_date", "start_time", "all_day", "color", "category", "reminder_minutes"):
+        for k in ("title", "description", "start_date", "end_date", "start_time", "all_day", "color", "category", "reminder_minutes", "chime_count"):
             if k in body:
                 fields[k] = body[k]
         # If reminder settings changed, reset reminded flag
