@@ -40,11 +40,14 @@ def get_settings():
 
 
 _tables_created = False
+_calendar_migrated = False
 
 def ensure_tables():
     """Create self-reflection tables if they don't exist. Idempotent."""
-    global _tables_created
+    global _tables_created, _calendar_migrated
     if _tables_created:
+        if not _calendar_migrated:
+            _run_calendar_migration()
         return True
 
     db_path = _find_goals_db()
@@ -156,22 +159,41 @@ def ensure_tables():
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         ''')
-        # Migration: add reminder columns to existing table
-        for col, default in [("start_time", "NULL"), ("reminder_minutes", "NULL"), ("reminded", "0")]:
-            try:
-                conn.execute(f'ALTER TABLE calendar_events ADD COLUMN {col} DEFAULT {default}')
-            except Exception:
-                pass
         conn.execute('CREATE INDEX IF NOT EXISTS idx_calendar_scope ON calendar_events(scope)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_calendar_start ON calendar_events(start_date)')
 
         conn.commit()
         conn.close()
         _tables_created = True
+        _run_calendar_migration()
         return True
     except Exception as e:
         logger.error(f"Self-Reflection: table creation error: {e}")
         return False
+
+
+def _run_calendar_migration():
+    """Ensure calendar_events has reminder columns (for tables created before this update)."""
+    global _calendar_migrated
+    if _calendar_migrated:
+        return
+    try:
+        conn = get_connection()
+        for col, coltype, default in [
+            ("start_time", "TEXT", "NULL"),
+            ("reminder_minutes", "INTEGER", "NULL"),
+            ("reminded", "INTEGER", "0"),
+        ]:
+            try:
+                conn.execute(f'ALTER TABLE calendar_events ADD COLUMN {col} {coltype} DEFAULT {default}')
+            except Exception:
+                pass  # Column already exists
+        conn.commit()
+        conn.close()
+        _calendar_migrated = True
+    except Exception as e:
+        logger.error(f"Calendar migration error: {e}")
+        _calendar_migrated = True  # Don't retry endlessly
 
 
 # ─── Corrections ─────────────────────────────────────────────────────────────

@@ -3118,14 +3118,14 @@ function _fireReminder(event) {
     // Show in-app toast
     _showReminderToast(title, timeStr, event.color || '#4a9eff');
 
-    // Browser notification (if permission granted)
-    if (Notification.permission === 'granted') {
+    // Browser notification (if supported and permission granted)
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         new Notification('\u{1F514} Mission Control Reminder', {
             body: `${title}${timeStr}`,
             icon: '/static/favicon.ico',
             tag: `mc-reminder-${event.id}`,
         });
-    } else if (Notification.permission !== 'denied') {
+    } else if (typeof Notification !== 'undefined' && Notification.permission !== 'denied') {
         Notification.requestPermission().then(perm => {
             if (perm === 'granted') {
                 new Notification('\u{1F514} Mission Control Reminder', {
@@ -3217,12 +3217,14 @@ async function _loadCalendarEvents() {
         const resp = await fetch(`/api/plugin/mission-control/calendar/events?scope=${encodeURIComponent(scope)}&start=${start}&end=${end}`, {
             headers: { 'X-CSRF-Token': CSRF() }
         });
+        if (!resp.ok) { console.error('[MC] Calendar API error:', resp.status); _renderFullCalendar(); return; }
         const data = await resp.json();
         _calendarEvents = data.events || [];
         _calendarTimeline = data.timeline || [];
         _renderFullCalendar();
     } catch (e) {
         console.error('[MC] Calendar load error:', e);
+        _renderFullCalendar(); // Still render the grid even if fetch fails
     }
 }
 
