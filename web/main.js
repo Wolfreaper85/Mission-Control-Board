@@ -21,6 +21,7 @@ export default {
             show: () => _onShowDashboard(),
             hide: () => _onHideDashboard(),
         });
+        _registerServiceWorker();
     }
 };
 
@@ -106,6 +107,9 @@ let _calendarYear = new Date().getFullYear();
 let _calendarMonth = new Date().getMonth(); // 0-indexed
 let _calendarEvents = [];
 let _calendarTimeline = [];
+
+// Service Worker state
+let _swRegistration = null;
 
 // Launcher state
 let _launcherCards = []; // discovered plugins
@@ -3086,6 +3090,65 @@ async function _loadToolStatus() {
     }
 }
 
+// ─── Service Worker ────────────────────────────────────────────────────────
+
+async function _registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) {
+        console.log('[MC] Service Workers not supported — reminders only work in active tab');
+        return;
+    }
+
+    try {
+        // Request notification permission early
+        if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+            Notification.requestPermission();
+        }
+
+        const swUrl = '/plugin-web/mission-control/sw-reminders.js';
+        const reg = await navigator.serviceWorker.register(swUrl, { scope: '/plugin-web/mission-control/' });
+        _swRegistration = reg;
+
+        // Wait for the SW to be ready
+        await navigator.serviceWorker.ready;
+
+        // Send init message with base URL and CSRF
+        const baseUrl = window.location.origin;
+        _sendSwMessage({ type: 'init', baseUrl, csrf: CSRF() });
+
+        // Listen for messages from the SW
+        navigator.serviceWorker.addEventListener('message', (e) => {
+            const msg = e.data;
+            if (msg.type === 'mc-reminder-fire') {
+                // SW detected a due reminder — play chime + show toast
+                const event = msg.event;
+                const time12 = _to12h(event.start_time);
+                const timeStr = time12 ? ` at ${time12}` : '';
+                _playAlarmSound();
+                _showReminderToast(event.title || 'Calendar Event', timeStr, event.color || '#4a9eff');
+            }
+            if (msg.type === 'mc-reminder-click') {
+                // User clicked a notification — switch to Mission Control
+                switchView('mission-control');
+            }
+        });
+
+        // Keep CSRF token updated (it can rotate)
+        setInterval(() => _sendSwMessage({ type: 'update-csrf', csrf: CSRF() }), 60000);
+
+        console.log('[MC] Service Worker registered — background reminders active');
+    } catch (e) {
+        console.warn('[MC] Service Worker registration failed:', e);
+    }
+}
+
+function _sendSwMessage(msg) {
+    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage(msg);
+    } else if (_swRegistration && _swRegistration.active) {
+        _swRegistration.active.postMessage(msg);
+    }
+}
+
 // ─── Calendar ──────────────────────────────────────────────────────────────
 
 let _editingEventId = null;
@@ -3093,6 +3156,9 @@ let _editingEventId = null;
 // ─── Reminder / Alarm System ───────────────────────────────────────────────
 
 async function _checkReminders() {
+    // If SW is active, it handles polling — skip to avoid duplicates
+    if (_swRegistration && _swRegistration.active) return;
+
     try {
         const resp = await fetch('/api/plugin/mission-control/calendar/reminders', {
             headers: { 'X-CSRF-Token': CSRF() }
@@ -3126,22 +3192,20 @@ function _fireReminder(event) {
     // Show in-app toast
     _showReminderToast(title, timeStr, event.color || '#4a9eff');
 
-    // Browser notification (if supported and permission granted)
-    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+    // Use SW for notification (handles click-to-focus), fall back to basic Notification API
+    if (_swRegistration && _swRegistration.active) {
+        _swRegistration.showNotification('Mission Control Reminder', {
+            body: `${title}${timeStr}`,
+            icon: '/static/favicon.ico',
+            tag: `mc-reminder-${event.id}`,
+            data: { eventId: event.id },
+            requireInteraction: true,
+        });
+    } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         new Notification('\u{1F514} Mission Control Reminder', {
             body: `${title}${timeStr}`,
             icon: '/static/favicon.ico',
             tag: `mc-reminder-${event.id}`,
-        });
-    } else if (typeof Notification !== 'undefined' && Notification.permission !== 'denied') {
-        Notification.requestPermission().then(perm => {
-            if (perm === 'granted') {
-                new Notification('\u{1F514} Mission Control Reminder', {
-                    body: `${title}${timeStr}`,
-                    icon: '/static/favicon.ico',
-                    tag: `mc-reminder-${event.id}`,
-                });
-            }
         });
     }
 }
