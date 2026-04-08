@@ -3,6 +3,21 @@
 
 from pathlib import Path
 
+
+def _get_active_scope():
+    """Get the active persona's goal scope from ContextVar (matches core goals module behavior)."""
+    try:
+        from core.chat.function_manager import scope_goal
+        return scope_goal.get()
+    except Exception:
+        return 'default'
+
+
+def _resolve_scope(arguments):
+    """Resolve scope: explicit argument > persona's active scope > 'default'."""
+    return arguments.get("scope") or _get_active_scope()
+
+
 def _find_goals_db():
     """Find goals.db regardless of whether we run from plugins/ or user/plugins/."""
     for i in range(6):
@@ -14,7 +29,17 @@ def _find_goals_db():
 ENABLED = True
 EMOJI = '\U0001f3af'
 
-AVAILABLE_FUNCTIONS = ['mission_status', 'take_note', 'search_notes', 'list_notes', 'self_reflect', 'get_learned_rules', 'post_bulletin', 'get_bulletins', 'keep_data', 'edit_memory']
+AVAILABLE_FUNCTIONS = [
+    'mission_status', 'take_note', 'search_notes', 'list_notes',
+    'self_reflect', 'get_learned_rules', 'post_bulletin', 'get_bulletins', 'edit_bulletin',
+    'keep_data', 'edit_memory',
+    'complete_goal', 'add_user_goal',
+    'create_event', 'update_event', 'delete_event',
+    'manage_daily_plan',
+    'create_habit', 'toggle_habit',
+    'focus_session',
+    'save_daily_note',
+]
 
 TOOLS = [
     {
@@ -22,7 +47,7 @@ TOOLS = [
         "is_local": True,
         "function": {
             "name": "mission_status",
-            "description": "Get a quick summary of your Mission Control dashboard — active goals, running agents, and recent activity. Use when the user asks about their workload, tasks, or agent status.",
+            "description": "Get a summary of the Mission Control dashboard — active goals, running agents, recent completions. Use whenever the user wants to know what's going on, what they're working on, their workload, task status, or anything about their current goals and agents.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -40,7 +65,7 @@ TOOLS = [
         "is_local": True,
         "function": {
             "name": "take_note",
-            "description": "Save a note to Mission Control's Notes board. Use when the user says 'take a note', 'remember this', 'note this down', 'save this for later', or similar. Always ask for or infer a short title and the note content.",
+            "description": "Save a note to Mission Control's Notes board. Use whenever the user's intent is to save, record, write down, or remember any piece of information for later reference. This includes any mention of notes, things to remember, things to jot down, or information they want stored. If the user indicates they have a note but hasn't given the content yet, ask what it is. Always infer a short title from the content.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -66,7 +91,7 @@ TOOLS = [
         "is_local": True,
         "function": {
             "name": "search_notes",
-            "description": "Search through saved notes in Mission Control. Use when the user says 'check my notes', 'find that note about...', 'do I have a note on...', 'look up my notes', or similar. Searches both title and content.",
+            "description": "Search through saved notes in Mission Control. Use whenever the user wants to find, look up, check, or retrieve a previously saved note. Also use when they ask if they have a note about something, or want to recall information they saved before. Searches both title and content.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -88,7 +113,7 @@ TOOLS = [
         "is_local": True,
         "function": {
             "name": "list_notes",
-            "description": "List all saved notes in Mission Control. Use when the user says 'show my notes', 'what notes do I have', 'list all notes', or similar.",
+            "description": "List all saved notes in Mission Control. Use whenever the user wants to see all their notes, browse what they've saved, or get an overview of their notes collection.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -106,7 +131,7 @@ TOOLS = [
         "is_local": True,
         "function": {
             "name": "self_reflect",
-            "description": "CALL THIS FUNCTION to record a self-reflection about a task you completed — do NOT write reflections in chat text, invoke this tool. Use after complex work, debugging, or when you notice something you could improve.",
+            "description": "CALL THIS FUNCTION to record a self-reflection about a task you completed — do NOT write reflections in chat text, invoke this tool. Use after complex work, debugging, mistakes, or when you notice something you could improve. This is for YOUR learning, not the user's notes.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -136,7 +161,7 @@ TOOLS = [
         "is_local": True,
         "function": {
             "name": "get_learned_rules",
-            "description": "Check your active learned rules — behavioral guidelines from past corrections and reflections. Use to review what you've learned or when you want to verify a rule before acting on it.",
+            "description": "Check your active learned rules — behavioral guidelines from past corrections and reflections. Use to review what you've learned, verify a rule before acting, or when the user asks what rules you follow.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -169,7 +194,7 @@ TOOLS = [
                     },
                     "description": {
                         "type": "string",
-                        "description": "Detailed description of what you're proposing"
+                        "description": "Detailed description of what you're proposing — MUST include specifics: what exactly would happen, when, and how. Never leave this empty."
                     },
                     "reason": {
                         "type": "string",
@@ -200,6 +225,36 @@ TOOLS = [
                     }
                 },
                 "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "edit_bulletin",
+            "description": "Edit an existing bulletin board request — update its title, description, or reason. Use when the user asks you to revise, fix, or add more detail to a bulletin you previously posted. Use get_bulletins first to find the bulletin ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bulletin_id": {
+                        "type": "integer",
+                        "description": "The ID of the bulletin to edit"
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "New title (max 200 chars)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "New detailed description of the proposal"
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Updated reason/justification"
+                    }
+                },
+                "required": ["bulletin_id"]
             }
         }
     },
@@ -252,6 +307,320 @@ TOOLS = [
                 "required": ["memory_id", "content"]
             }
         }
+    },
+
+    # ─── Goal Completion (create_goal & update_goal live in core goals module) ─
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "complete_goal",
+            "description": "Mark a user goal as completed. Use after you finish executing a user's goal, or when the user says a goal is done. Awards XP automatically. Use mission_status first to find goal IDs if needed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal_id": {
+                        "type": "integer",
+                        "description": "The ID of the goal to complete"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Scope (default: 'default')"
+                    }
+                },
+                "required": ["goal_id"]
+            }
+        }
+    },
+
+    # ─── User Goal (guarded — only when user explicitly says "add to my goals") ─
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "add_user_goal",
+            "description": "Add a goal to the user's personal goals board. ONLY use this when the user explicitly asks to add something to their goals — e.g. 'add this to my goals', 'create a goal for...', 'I want a goal to...'. Never create goals on your own initiative.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short goal title (max 200 chars)"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "The instruction set / brief for this goal — what should be done when executing it"
+                    },
+                    "priority": {
+                        "type": "string",
+                        "enum": ["high", "medium", "low"],
+                        "description": "Goal priority (default: medium)"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Scope (default: 'default')"
+                    }
+                },
+                "required": ["title"]
+            }
+        }
+    },
+
+    # ─── Calendar ─────────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "create_event",
+            "description": "Create a calendar event in Mission Control. Use whenever the user wants to schedule, plan, book, or put something on their calendar. This includes meetings, appointments, reminders, deadlines, or any time-based event. Dates should be YYYY-MM-DD format — if the user mentions a day of the week or relative date like 'tomorrow' or 'next Friday', calculate the correct date.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Event title"
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "description": "Start date in YYYY-MM-DD format"
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "description": "End date in YYYY-MM-DD (defaults to start_date)"
+                    },
+                    "start_time": {
+                        "type": "string",
+                        "description": "Start time in HH:MM format (24h). Omit for all-day events."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional event description"
+                    },
+                    "category": {
+                        "type": "string",
+                        "enum": ["event", "meeting", "deadline", "reminder", "goal"],
+                        "description": "Event category (default: event)"
+                    },
+                    "color": {
+                        "type": "string",
+                        "description": "Hex color like #4a9eff (optional)"
+                    },
+                    "reminder_minutes": {
+                        "type": "integer",
+                        "description": "Reminder N minutes before event (e.g. 15, 30, 60)"
+                    },
+                    "recurrence": {
+                        "type": "string",
+                        "enum": ["daily", "weekly", "monthly"],
+                        "description": "Recurrence pattern (optional — omit for one-time events)"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Scope (default: 'default')"
+                    }
+                },
+                "required": ["title", "start_date"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "update_event",
+            "description": "Update an existing calendar event — change title, date, time, description, or other details. Use whenever the user wants to move, reschedule, or modify a calendar event.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event_id": {
+                        "type": "integer",
+                        "description": "The ID of the event to update"
+                    },
+                    "title": { "type": "string", "description": "New title" },
+                    "start_date": { "type": "string", "description": "New start date YYYY-MM-DD" },
+                    "end_date": { "type": "string", "description": "New end date YYYY-MM-DD" },
+                    "start_time": { "type": "string", "description": "New start time HH:MM" },
+                    "description": { "type": "string", "description": "New description" },
+                    "category": { "type": "string", "description": "New category" },
+                    "color": { "type": "string", "description": "New hex color" },
+                    "reminder_minutes": { "type": "integer", "description": "New reminder minutes" },
+                    "scope": { "type": "string", "description": "Scope (default: 'default')" }
+                },
+                "required": ["event_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "delete_event",
+            "description": "Delete a calendar event. Use whenever the user wants to cancel, remove, or delete something from their calendar.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event_id": {
+                        "type": "integer",
+                        "description": "The ID of the event to delete"
+                    }
+                },
+                "required": ["event_id"]
+            }
+        }
+    },
+
+    # ─── Daily Plan ───────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "manage_daily_plan",
+            "description": "Create or complete today's daily plan. Use whenever the user wants to plan their day, pick goals to focus on today, or indicate they're finished with their daily plan. To create a plan, provide goal_ids from the user's goals. To mark the plan as done, set action to 'complete'. Use mission_status first to get available goal IDs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "complete"],
+                        "description": "'create' to set today's plan, 'complete' to mark it done"
+                    },
+                    "goal_ids": {
+                        "type": "array",
+                        "items": { "type": "integer" },
+                        "description": "List of goal IDs to include in today's plan (required for 'create')"
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "Date in YYYY-MM-DD (defaults to today)"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Scope (default: 'default')"
+                    }
+                },
+                "required": ["action"]
+            }
+        }
+    },
+
+    # ─── Habits ───────────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "create_habit",
+            "description": "Create a new habit to track daily or weekly. Use whenever the user wants to start tracking a routine, build a new habit, or add something they want to do regularly. If they indicate they have a habit to add but haven't said what, ask them.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Habit name (e.g. 'Drink 8 glasses of water', 'Exercise 30min')"
+                    },
+                    "icon": {
+                        "type": "string",
+                        "description": "Emoji icon for the habit (default: ✅)"
+                    },
+                    "frequency": {
+                        "type": "string",
+                        "enum": ["daily", "weekly"],
+                        "description": "How often (default: daily)"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Scope (default: 'default')"
+                    }
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "toggle_habit",
+            "description": "Toggle a habit as done/undone for today. Use whenever the user indicates they completed a tracked habit, did their routine, or wants to check off / uncheck a habit for the day. Awards 15 XP per check-in.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "habit_id": {
+                        "type": "integer",
+                        "description": "The ID of the habit to toggle"
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "Date in YYYY-MM-DD (defaults to today)"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Scope (default: 'default')"
+                    }
+                },
+                "required": ["habit_id"]
+            }
+        }
+    },
+
+    # ─── Focus Sessions ───────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "focus_session",
+            "description": "Start or stop a focus/pomodoro session. Use whenever the user wants to begin focused work, start a timer, do deep work, or end an active focus session. Awards XP based on duration (30 XP per 25-minute block).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["start", "stop"],
+                        "description": "'start' to begin a session, 'stop' to end the current one"
+                    },
+                    "goal_id": {
+                        "type": "integer",
+                        "description": "Optional goal to link the focus session to (for 'start')"
+                    },
+                    "session_id": {
+                        "type": "integer",
+                        "description": "Session ID to stop (required for 'stop')"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Scope (default: 'default')"
+                    }
+                },
+                "required": ["action"]
+            }
+        }
+    },
+
+    # ─── Daily Notes ──────────────────────────────────────────────────────────
+    {
+        "type": "function",
+        "is_local": True,
+        "function": {
+            "name": "save_daily_note",
+            "description": "Save a daily journal entry. Use whenever the user wants to write in their journal, log something about their day, or add a daily reflection. This is one entry per day (overwrites previous for that date). Different from take_note — this is the daily journal on the Calendar tab, not the Notes board.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "The journal/note content"
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "Date in YYYY-MM-DD (defaults to today)"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Scope (default: 'default')"
+                    }
+                },
+                "required": ["content"]
+            }
+        }
     }
 ]
 
@@ -274,10 +643,32 @@ def execute(function_name, arguments, config):
         return _post_bulletin(arguments, config)
     elif function_name == "get_bulletins":
         return _get_bulletins(arguments, config)
+    elif function_name == "edit_bulletin":
+        return _edit_bulletin(arguments, config)
     elif function_name == "keep_data":
         return _keep_data(arguments, config)
     elif function_name == "edit_memory":
         return _edit_memory(arguments, config)
+    elif function_name == "complete_goal":
+        return _complete_goal(arguments, config)
+    elif function_name == "add_user_goal":
+        return _add_user_goal(arguments, config)
+    elif function_name == "create_event":
+        return _create_event(arguments, config)
+    elif function_name == "update_event":
+        return _update_event(arguments, config)
+    elif function_name == "delete_event":
+        return _delete_event(arguments, config)
+    elif function_name == "manage_daily_plan":
+        return _manage_daily_plan(arguments, config)
+    elif function_name == "create_habit":
+        return _create_habit(arguments, config)
+    elif function_name == "toggle_habit":
+        return _toggle_habit(arguments, config)
+    elif function_name == "focus_session":
+        return _focus_session(arguments, config)
+    elif function_name == "save_daily_note":
+        return _save_daily_note(arguments, config)
     return "Unknown function", False
 
 
@@ -286,10 +677,10 @@ def _mission_status(arguments, config):
     import sqlite3
     from pathlib import Path
 
-    scope = arguments.get("scope", "default")
+    scope = _resolve_scope(arguments)
     lines = ["\U0001f3af **Mission Control Status**\n"]
 
-    # Goals summary
+    # User Goals summary (user-owned goals from MC plugin)
     goals_db = _find_goals_db()
     if goals_db.exists():
         try:
@@ -304,32 +695,18 @@ def _mission_status(arguments, config):
                 scope_sql = "scope IN (?, 'global')"
                 scope_params = [scope]
 
-            # Count by status
-            cur.execute(f"SELECT status, COUNT(*) as cnt FROM goals WHERE {scope_sql} GROUP BY status", scope_params)
+            # Count user goals by status
+            cur.execute(f"SELECT status, COUNT(*) as cnt FROM user_goals WHERE {scope_sql} GROUP BY status", scope_params)
             counts = {row["status"]: row["cnt"] for row in cur.fetchall()}
             active = counts.get("active", 0)
             completed = counts.get("completed", 0)
-            abandoned = counts.get("abandoned", 0)
-            total = active + completed + abandoned
+            total = active + completed
 
-            lines.append(f"**Goals:** {total} total | {active} active | {completed} completed | {abandoned} abandoned")
+            lines.append(f"**Your Goals:** {total} total | {active} active | {completed} completed")
 
-            # Permanent goals
+            # Active user goals
             cur.execute(
-                f"SELECT id, title, priority FROM goals WHERE {scope_sql} AND permanent = 1 AND parent_id IS NULL ORDER BY "
-                "CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END",
-                scope_params
-            )
-            perm_rows = cur.fetchall()
-            if perm_rows:
-                lines.append("\n**\U0001f4cc Permanent Goals:**")
-                for r in perm_rows:
-                    icon = {"high": "\U0001f534", "medium": "\U0001f7e1", "low": "\U0001f7e2"}.get(r["priority"], "\u26aa")
-                    lines.append(f"  {icon} [{r['id']}] {r['title']}")
-
-            # Active (non-permanent) goals
-            cur.execute(
-                f"SELECT id, title, priority, updated_at FROM goals WHERE {scope_sql} AND status = 'active' AND permanent = 0 AND parent_id IS NULL ORDER BY "
+                f"SELECT id, title, priority, description FROM user_goals WHERE {scope_sql} AND status = 'active' ORDER BY "
                 "CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, updated_at DESC LIMIT 10",
                 scope_params
             )
@@ -338,11 +715,12 @@ def _mission_status(arguments, config):
                 lines.append("\n**\U0001f7e2 Active Goals:**")
                 for r in rows:
                     icon = {"high": "\U0001f534", "medium": "\U0001f7e1", "low": "\U0001f7e2"}.get(r["priority"], "\u26aa")
-                    lines.append(f"  {icon} [{r['id']}] {r['title']}")
+                    desc_hint = f" — {r['description'][:60]}..." if r["description"] else ""
+                    lines.append(f"  {icon} [{r['id']}] {r['title']}{desc_hint}")
 
-            # Recently completed goals
+            # Recently completed user goals
             cur.execute(
-                f"SELECT id, title, completed_at FROM goals WHERE {scope_sql} AND status = 'completed' AND parent_id IS NULL ORDER BY completed_at DESC LIMIT 5",
+                f"SELECT id, title, completed_at FROM user_goals WHERE {scope_sql} AND status = 'completed' ORDER BY completed_at DESC LIMIT 5",
                 scope_params
             )
             done_rows = cur.fetchall()
@@ -356,7 +734,7 @@ def _mission_status(arguments, config):
         except Exception as e:
             lines.append(f"Goals: error reading database ({e})")
     else:
-        lines.append("**Goals:** No goals yet. Create one to get started!")
+        lines.append("**Your Goals:** No goals yet. Create one in Mission Control!")
 
     # Agent summary
     try:
@@ -387,7 +765,7 @@ def _take_note(arguments, config):
 
     title = arguments.get("title", "").strip()
     content = arguments.get("content", "").strip()
-    scope = arguments.get("scope", "default")
+    scope = _resolve_scope(arguments)
 
     if not title or not content:
         return "Error: Both title and content are required to take a note.", False
@@ -425,7 +803,7 @@ def _search_notes(arguments, config):
     from pathlib import Path
 
     query = arguments.get("query", "").strip()
-    scope = arguments.get("scope", "default")
+    scope = _resolve_scope(arguments)
 
     if not query:
         return "Please provide a search term to look for in your notes.", False
@@ -462,7 +840,7 @@ def _list_notes(arguments, config):
     import sqlite3
     from pathlib import Path
 
-    scope = arguments.get("scope", "default")
+    scope = _resolve_scope(arguments)
 
     goals_db = _find_goals_db()
     if not goals_db.exists():
@@ -515,7 +893,7 @@ def _self_reflect(arguments, config):
     if not task_context or not lesson:
         return "Error: task_context and lesson are required.", False
 
-    scope = arguments.get("scope", "default")
+    scope = _resolve_scope(arguments)
 
     try:
         plugin = _load_reflection()
@@ -535,7 +913,7 @@ def _self_reflect(arguments, config):
 
 def _get_learned_rules(arguments, config):
     """Get active learned rules."""
-    scope = arguments.get("scope", "default")
+    scope = _resolve_scope(arguments)
 
     try:
         plugin = _load_reflection()
@@ -561,10 +939,13 @@ def _post_bulletin(arguments, config):
     title = arguments.get("title", "").strip()
     description = arguments.get("description", "").strip()
     reason = arguments.get("reason", "").strip()
-    scope = arguments.get("scope", "default")
+    scope = _resolve_scope(arguments)
 
     if not request_type or not title:
         return "Error: request_type and title are required.", False
+
+    if not description:
+        return "Error: description is required — explain specifically what you're proposing, not just why.", False
 
     valid_types = ("standing_order", "rule_promotion", "schedule", "capability")
     if request_type not in valid_types:
@@ -591,7 +972,7 @@ def _post_bulletin(arguments, config):
 def _get_bulletins(arguments, config):
     """Check the bulletin board."""
     status = arguments.get("status")
-    scope = arguments.get("scope", "default")
+    scope = _resolve_scope(arguments)
 
     try:
         plugin = _load_reflection()
@@ -617,6 +998,42 @@ def _get_bulletins(arguments, config):
         return "\n".join(lines), True
     except Exception as e:
         return f"Error: {e}", False
+
+
+def _edit_bulletin(arguments, config):
+    """Edit an existing bulletin board entry."""
+    import sqlite3
+
+    bulletin_id = arguments.get("bulletin_id")
+    if not bulletin_id:
+        return "Error: bulletin_id is required.", False
+
+    fields = []
+    params = []
+    for key, col, max_len in [("title", "title", 200), ("description", "description", 2000), ("reason", "reason", 2000)]:
+        val = arguments.get(key)
+        if val is not None:
+            fields.append(f"{col} = ?")
+            params.append(val.strip()[:max_len])
+
+    if not fields:
+        return "Error: Nothing to update. Provide title, description, or reason.", False
+
+    params.append(int(bulletin_id))
+
+    try:
+        goals_db = _find_goals_db()
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+        cur = conn.execute(f"UPDATE bulletin_board SET {', '.join(fields)} WHERE id = ?", params)
+        if cur.rowcount == 0:
+            conn.close()
+            return f"Error: Bulletin [{bulletin_id}] not found.", False
+        conn.commit()
+        conn.close()
+        return f"\u2705 Bulletin [{bulletin_id}] updated.", True
+    except Exception as e:
+        return f"Error editing bulletin: {e}", False
 
 
 def _keep_data(arguments, config):
@@ -740,3 +1157,618 @@ def _edit_memory(arguments, config):
 
     except Exception as e:
         return f"Error editing memory: {e}", False
+
+
+# ─── Goal Management Tools ────────────────────────────────────────────────────
+
+def _create_goal(arguments, config):
+    """Create a goal in Mission Control."""
+    import sqlite3
+    import json
+    from datetime import datetime, date
+
+    title = arguments.get("title", "").strip()
+    if not title:
+        return "Error: title is required.", False
+
+    description = arguments.get("description", "").strip()
+    priority = arguments.get("priority", "medium")
+    permanent = 1 if arguments.get("permanent") else 0
+    scope = _resolve_scope(arguments)
+
+    if priority not in ("high", "medium", "low"):
+        priority = "medium"
+
+    goals_db = _find_goals_db()
+    if not goals_db.exists():
+        return "Error: Database not initialized. Send a message in chat first.", False
+
+    try:
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+        cur = conn.execute(
+            "INSERT INTO goals (title, description, priority, status, permanent, scope, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'active', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+            (title[:200], description[:500], priority, permanent, scope)
+        )
+        goal_id = cur.lastrowid
+
+        # Auto-add to today's daily plan so AI-created goals appear immediately
+        today = date.today().isoformat()
+        try:
+            row = conn.execute(
+                "SELECT id, goal_ids FROM daily_plans WHERE plan_date = ? AND scope = ?",
+                (today, scope)
+            ).fetchone()
+            if row:
+                existing_ids = json.loads(row[1] or '[]')
+                if goal_id not in existing_ids:
+                    existing_ids.append(goal_id)
+                    conn.execute("UPDATE daily_plans SET goal_ids = ? WHERE id = ?",
+                                 (json.dumps(existing_ids), row[0]))
+            else:
+                conn.execute(
+                    "INSERT INTO daily_plans (plan_date, goal_ids, scope) VALUES (?, ?, ?)",
+                    (today, json.dumps([goal_id]), scope)
+                )
+        except Exception as plan_err:
+            logger.debug(f"Auto-add to daily plan failed (non-fatal): {plan_err}")
+
+        conn.commit()
+        conn.close()
+
+        perm_tag = " (permanent)" if permanent else ""
+        icon = {"high": "\U0001f534", "medium": "\U0001f7e1", "low": "\U0001f7e2"}.get(priority, "\u26aa")
+        return f"{icon} **Goal created!** [{goal_id}] {title}{perm_tag}\n*Priority: {priority} | View in Mission Control → Goals*", True
+    except Exception as e:
+        return f"Error creating goal: {e}", False
+
+
+def _update_goal(arguments, config):
+    """Update a goal's title, description, or priority."""
+    import sqlite3
+
+    goal_id = arguments.get("goal_id")
+    if not goal_id:
+        return "Error: goal_id is required.", False
+
+    scope = _resolve_scope(arguments)
+    goals_db = _find_goals_db()
+    if not goals_db.exists():
+        return "Error: Database not initialized.", False
+
+    fields = []
+    params = []
+    for key, col, max_len in [("title", "title", 200), ("description", "description", 500)]:
+        val = arguments.get(key)
+        if val is not None:
+            fields.append(f"{col} = ?")
+            params.append(val.strip()[:max_len])
+
+    priority = arguments.get("priority")
+    if priority and priority in ("high", "medium", "low"):
+        fields.append("priority = ?")
+        params.append(priority)
+
+    if not fields:
+        return "Error: Nothing to update. Provide title, description, or priority.", False
+
+    fields.append("updated_at = CURRENT_TIMESTAMP")
+    params.extend([int(goal_id), scope])
+
+    try:
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            f"UPDATE goals SET {', '.join(fields)} WHERE id = ? AND scope IN (?, 'global')",
+            params
+        )
+        conn.commit()
+        conn.close()
+        return f"\u2705 Goal [{goal_id}] updated.", True
+    except Exception as e:
+        return f"Error updating goal: {e}", False
+
+
+def _complete_goal(arguments, config):
+    """Mark a user goal as completed, with XP award."""
+    import sqlite3
+    import json
+    from datetime import datetime
+
+    goal_id = arguments.get("goal_id")
+    if not goal_id:
+        return "Error: goal_id is required.", False
+
+    status = arguments.get("status", "completed")
+    if status not in ("completed",):
+        status = "completed"
+
+    scope = _resolve_scope(arguments)
+    goals_db = _find_goals_db()
+    if not goals_db.exists():
+        return "Error: Database not initialized.", False
+
+    try:
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+
+        # Look up in user_goals table
+        row = conn.execute("SELECT title, priority FROM user_goals WHERE id = ?", (int(goal_id),)).fetchone()
+        if not row:
+            conn.close()
+            return f"Error: User goal [{goal_id}] not found.", False
+
+        title = row["title"]
+        priority = row["priority"]
+
+        conn.execute(
+            "UPDATE user_goals SET status = 'completed', completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (int(goal_id),)
+        )
+
+        # Award XP
+        xp_map = {"high": 50, "medium": 30, "low": 15}
+        xp = xp_map.get(priority, 30)
+        try:
+            conn.execute(
+                "INSERT INTO xp_log (action, xp_amount, scope, details) VALUES (?, ?, ?, ?)",
+                ("user_goal_complete", xp, scope, json.dumps({"goal_id": goal_id, "title": title}))
+            )
+        except Exception:
+            pass
+
+        conn.commit()
+        conn.close()
+        return f"\u2705 **Goal completed!** [{goal_id}] {title}\n+{xp} XP awarded ({priority} priority)", True
+
+    except Exception as e:
+        return f"Error completing goal: {e}", False
+
+
+def _add_user_goal(arguments, config):
+    """Create a user goal (only when user explicitly requests it)."""
+    title = arguments.get("title", "").strip()
+    if not title:
+        return "Error: title is required.", False
+
+    description = arguments.get("description", "").strip() or None
+    priority = arguments.get("priority", "medium")
+    scope = _resolve_scope(arguments)
+
+    try:
+        import importlib.util, sys
+        plugin_file = Path(__file__).parent.parent / "plugin.py"
+        spec = importlib.util.spec_from_file_location("_mc_plugin_goals", plugin_file)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["_mc_plugin_goals"] = module
+        spec.loader.exec_module(module)
+
+        goal_id = module.create_user_goal(title, description, priority, scope)
+        if goal_id:
+            icon = {"high": "\U0001f534", "medium": "\U0001f7e1", "low": "\U0001f7e2"}.get(priority, "\u26aa")
+            desc_line = f"\n**Brief:** {description[:200]}" if description else ""
+            return f"{icon} **Goal added!** [{goal_id}] {title}{desc_line}\n\n*View in Mission Control → Goals*", True
+        return "Error: Failed to create goal.", False
+    except Exception as e:
+        return f"Error creating goal: {e}", False
+
+
+# ─── Calendar Tools ───────────────────────────────────────────────────────────
+
+def _create_event(arguments, config):
+    """Create a calendar event."""
+    import sqlite3
+
+    title = arguments.get("title", "").strip()
+    start_date = arguments.get("start_date", "").strip()
+    if not title or not start_date:
+        return "Error: title and start_date are required.", False
+
+    end_date = arguments.get("end_date", start_date).strip()
+    start_time = arguments.get("start_time")
+    description = arguments.get("description", "")
+    category = arguments.get("category", "event")
+    color = arguments.get("color", "#4a9eff")
+    reminder_minutes = arguments.get("reminder_minutes")
+    recurrence = arguments.get("recurrence")
+    scope = _resolve_scope(arguments)
+    all_day = 0 if start_time else 1
+
+    goals_db = _find_goals_db()
+    if not goals_db.exists():
+        return "Error: Database not initialized.", False
+
+    try:
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+        cur = conn.execute(
+            "INSERT INTO calendar_events (title, description, start_date, end_date, start_time, all_day, color, category, scope, reminder_minutes, chime_count, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 3, CURRENT_TIMESTAMP)",
+            (title, description, start_date, end_date, start_time, all_day, color, category, scope, reminder_minutes)
+        )
+        event_id = cur.lastrowid
+
+        # Handle recurrence
+        if recurrence and recurrence in ("daily", "weekly", "monthly"):
+            try:
+                conn.execute(
+                    "INSERT INTO recurring_rules (event_id, pattern, interval_val, scope, created_at) VALUES (?, ?, 1, ?, CURRENT_TIMESTAMP)",
+                    (event_id, recurrence, scope)
+                )
+            except Exception:
+                pass  # Recurring table may not exist
+
+        conn.commit()
+        conn.close()
+
+        time_str = f" at {start_time}" if start_time else " (all day)"
+        recur_str = f" — repeats {recurrence}" if recurrence else ""
+        return f"\U0001f4c5 **Event created!** [{event_id}] {title}\n{start_date}{time_str}{recur_str}\n*View in Mission Control → Calendar*", True
+    except Exception as e:
+        return f"Error creating event: {e}", False
+
+
+def _update_event(arguments, config):
+    """Update a calendar event."""
+    import sqlite3
+
+    event_id = arguments.get("event_id")
+    if not event_id:
+        return "Error: event_id is required.", False
+
+    goals_db = _find_goals_db()
+    if not goals_db.exists():
+        return "Error: Database not initialized.", False
+
+    fields = []
+    params = []
+    for key in ["title", "description", "start_date", "end_date", "start_time", "category", "color"]:
+        val = arguments.get(key)
+        if val is not None:
+            fields.append(f"{key} = ?")
+            params.append(val)
+
+    reminder = arguments.get("reminder_minutes")
+    if reminder is not None:
+        fields.append("reminder_minutes = ?")
+        params.append(reminder)
+
+    if not fields:
+        return "Error: Nothing to update.", False
+
+    params.append(int(event_id))
+
+    try:
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(f"UPDATE calendar_events SET {', '.join(fields)} WHERE id = ?", params)
+        conn.commit()
+        conn.close()
+        return f"\u2705 Event [{event_id}] updated.", True
+    except Exception as e:
+        return f"Error updating event: {e}", False
+
+
+def _delete_event(arguments, config):
+    """Delete a calendar event."""
+    import sqlite3
+
+    event_id = arguments.get("event_id")
+    if not event_id:
+        return "Error: event_id is required.", False
+
+    goals_db = _find_goals_db()
+    if not goals_db.exists():
+        return "Error: Database not initialized.", False
+
+    try:
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+
+        # Get event title for confirmation
+        row = conn.execute("SELECT title FROM calendar_events WHERE id = ?", (int(event_id),)).fetchone()
+        if not row:
+            conn.close()
+            return f"Error: Event [{event_id}] not found.", False
+        title = row[0]
+
+        conn.execute("DELETE FROM calendar_events WHERE id = ?", (int(event_id),))
+        # Also clean up recurring rules
+        try:
+            conn.execute("DELETE FROM recurring_rules WHERE event_id = ?", (int(event_id),))
+        except Exception:
+            pass
+
+        conn.commit()
+        conn.close()
+        return f"\U0001f5d1\ufe0f Event [{event_id}] \"{title}\" deleted.", True
+    except Exception as e:
+        return f"Error deleting event: {e}", False
+
+
+# ─── Daily Plan Tools ─────────────────────────────────────────────────────────
+
+def _manage_daily_plan(arguments, config):
+    """Create or complete a daily plan."""
+    import sqlite3
+    import json
+    from datetime import date
+
+    action = arguments.get("action", "create")
+    scope = _resolve_scope(arguments)
+    plan_date = arguments.get("date", date.today().isoformat())
+
+    goals_db = _find_goals_db()
+    if not goals_db.exists():
+        return "Error: Database not initialized.", False
+
+    try:
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+
+        if action == "create":
+            goal_ids = arguments.get("goal_ids", [])
+            if not goal_ids:
+                return "Error: goal_ids are required to create a daily plan.", False
+
+            # Get goal titles for confirmation (from user_goals table)
+            placeholders = ",".join("?" * len(goal_ids))
+            rows = conn.execute(
+                f"SELECT id, title, priority FROM user_goals WHERE id IN ({placeholders})",
+                goal_ids
+            ).fetchall()
+
+            conn.execute(
+                "INSERT OR REPLACE INTO daily_plans (plan_date, scope, goal_ids, completed, created_at) VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP)",
+                (plan_date, scope, json.dumps(goal_ids))
+            )
+            conn.commit()
+            conn.close()
+
+            lines = [f"\U0001f4cb **Daily plan set for {plan_date}!**\n"]
+            for r in rows:
+                icon = {"high": "\U0001f534", "medium": "\U0001f7e1", "low": "\U0001f7e2"}.get(r[2], "\u26aa")
+                lines.append(f"  {icon} [{r[0]}] {r[1]}")
+            lines.append(f"\n*{len(goal_ids)} goals planned. Complete them to earn bonus XP!*")
+            return "\n".join(lines), True
+
+        elif action == "complete":
+            conn.execute(
+                "UPDATE daily_plans SET completed = 1 WHERE plan_date = ? AND scope = ?",
+                (plan_date, scope)
+            )
+            # Award bonus XP
+            try:
+                conn.execute(
+                    "INSERT INTO xp_log (action, xp_amount, scope, details, timestamp) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                    ("daily_plan_complete", 100, scope, json.dumps({"date": plan_date}))
+                )
+            except Exception:
+                pass
+
+            conn.commit()
+            conn.close()
+            return f"\U0001f389 **Daily plan completed!** Great work today!\n+100 bonus XP awarded", True
+
+        else:
+            conn.close()
+            return f"Error: Unknown action '{action}'. Use 'create' or 'complete'.", False
+
+    except Exception as e:
+        return f"Error with daily plan: {e}", False
+
+
+# ─── Habit Tools ──────────────────────────────────────────────────────────────
+
+def _create_habit(arguments, config):
+    """Create a new habit."""
+    import sqlite3
+
+    name = arguments.get("name", "").strip()
+    if not name:
+        return "Error: name is required.", False
+
+    icon = arguments.get("icon", "\u2705")
+    frequency = arguments.get("frequency", "daily")
+    scope = _resolve_scope(arguments)
+
+    goals_db = _find_goals_db()
+    if not goals_db.exists():
+        return "Error: Database not initialized.", False
+
+    try:
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+        cur = conn.execute(
+            "INSERT INTO habits (name, icon, frequency, scope, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            (name, icon, frequency, scope)
+        )
+        habit_id = cur.lastrowid
+        conn.commit()
+        conn.close()
+        return f"{icon} **Habit created!** [{habit_id}] {name} ({frequency})\n*Track it daily in Mission Control → Dashboard*", True
+    except Exception as e:
+        return f"Error creating habit: {e}", False
+
+
+def _toggle_habit(arguments, config):
+    """Toggle habit completion for a date."""
+    import sqlite3
+    from datetime import date
+
+    habit_id = arguments.get("habit_id")
+    if not habit_id:
+        return "Error: habit_id is required.", False
+
+    toggle_date = arguments.get("date", date.today().isoformat())
+    scope = _resolve_scope(arguments)
+
+    goals_db = _find_goals_db()
+    if not goals_db.exists():
+        return "Error: Database not initialized.", False
+
+    try:
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+
+        # Get habit name
+        habit = conn.execute("SELECT name, icon FROM habits WHERE id = ?", (int(habit_id),)).fetchone()
+        if not habit:
+            conn.close()
+            return f"Error: Habit [{habit_id}] not found.", False
+
+        # Check if already completed today
+        existing = conn.execute(
+            "SELECT id FROM habit_completions WHERE habit_id = ? AND date = ?",
+            (int(habit_id), toggle_date)
+        ).fetchone()
+
+        if existing:
+            conn.execute("DELETE FROM habit_completions WHERE id = ?", (existing["id"],))
+            conn.commit()
+            conn.close()
+            return f"\u26aa Habit [{habit_id}] {habit['name']} — unchecked for {toggle_date}", True
+        else:
+            conn.execute(
+                "INSERT INTO habit_completions (habit_id, date, completed_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                (int(habit_id), toggle_date)
+            )
+            # Award XP
+            try:
+                conn.execute(
+                    "INSERT INTO xp_log (action, xp_amount, scope, details, timestamp) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                    ("habit_checkin", 15, scope, f'{{"habit_id": {habit_id}}}')
+                )
+            except Exception:
+                pass
+
+            conn.commit()
+            conn.close()
+            return f"{habit['icon']} **{habit['name']}** — checked off for {toggle_date}!\n+15 XP", True
+
+    except Exception as e:
+        return f"Error toggling habit: {e}", False
+
+
+# ─── Focus Session Tools ─────────────────────────────────────────────────────
+
+def _focus_session(arguments, config):
+    """Start or stop a focus session."""
+    import sqlite3
+    from datetime import datetime
+
+    action = arguments.get("action", "start")
+    scope = _resolve_scope(arguments)
+
+    goals_db = _find_goals_db()
+    if not goals_db.exists():
+        return "Error: Database not initialized.", False
+
+    try:
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+
+        if action == "start":
+            goal_id = arguments.get("goal_id")
+            session_type = arguments.get("type", "work")
+            now = datetime.now().isoformat()
+
+            cur = conn.execute(
+                "INSERT INTO focus_sessions (goal_id, start_time, type, scope, completed) VALUES (?, ?, ?, ?, 0)",
+                (goal_id, now, session_type, scope)
+            )
+            session_id = cur.lastrowid
+            conn.commit()
+            conn.close()
+
+            goal_str = f" on goal [{goal_id}]" if goal_id else ""
+            return f"\u23f1\ufe0f **Focus session started!** [{session_id}]{goal_str}\n*Stay focused! Tell me when you're done to stop the timer.*", True
+
+        elif action == "stop":
+            session_id = arguments.get("session_id")
+
+            # If no session_id, find the most recent active session
+            if not session_id:
+                row = conn.execute(
+                    "SELECT id, start_time, goal_id FROM focus_sessions WHERE end_time IS NULL AND scope = ? ORDER BY start_time DESC LIMIT 1",
+                    (scope,)
+                ).fetchone()
+                if not row:
+                    conn.close()
+                    return "No active focus session found.", False
+                session_id = row[0]
+                start_time = row[1]
+            else:
+                row = conn.execute(
+                    "SELECT start_time FROM focus_sessions WHERE id = ?",
+                    (int(session_id),)
+                ).fetchone()
+                if not row:
+                    conn.close()
+                    return f"Error: Session [{session_id}] not found.", False
+                start_time = row[0]
+
+            now = datetime.now()
+            start = datetime.fromisoformat(start_time)
+            duration = int((now - start).total_seconds() / 60)
+
+            conn.execute(
+                "UPDATE focus_sessions SET end_time = ?, duration_minutes = ?, completed = 1 WHERE id = ?",
+                (now.isoformat(), duration, int(session_id))
+            )
+
+            # Award XP based on duration
+            xp = max(10, 30 * (duration // 25))  # 30 XP per pomodoro (25min)
+            try:
+                conn.execute(
+                    "INSERT INTO xp_log (action, xp_amount, scope, details, timestamp) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                    ("focus_complete", xp, scope, f'{{"session_id": {session_id}, "minutes": {duration}}}')
+                )
+            except Exception:
+                pass
+
+            conn.commit()
+            conn.close()
+            return f"\u2705 **Focus session complete!** [{session_id}]\n*Duration: {duration} minutes*\n+{xp} XP awarded", True
+
+        else:
+            conn.close()
+            return f"Error: Unknown action '{action}'. Use 'start' or 'stop'.", False
+
+    except Exception as e:
+        return f"Error with focus session: {e}", False
+
+
+# ─── Daily Note Tool ──────────────────────────────────────────────────────────
+
+def _save_daily_note(arguments, config):
+    """Save a daily journal entry."""
+    import sqlite3
+    from datetime import date
+
+    content = arguments.get("content", "").strip()
+    if not content:
+        return "Error: content is required.", False
+
+    note_date = arguments.get("date", date.today().isoformat())
+    scope = _resolve_scope(arguments)
+
+    goals_db = _find_goals_db()
+    if not goals_db.exists():
+        return "Error: Database not initialized.", False
+
+    try:
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "INSERT OR REPLACE INTO daily_notes (date, scope, content, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+            (note_date, scope, content)
+        )
+        conn.commit()
+        conn.close()
+        return f"\U0001f4d3 **Daily note saved for {note_date}!**\n{content[:200]}{'...' if len(content) > 200 else ''}\n*View in Mission Control → Calendar*", True
+    except Exception as e:
+        return f"Error saving daily note: {e}", False

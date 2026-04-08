@@ -69,15 +69,15 @@ def _build_digest():
     digest_lines.append(f"*{now.strftime('%B %d, %Y • %I:%M %p UTC')}*")
     digest_lines.append("")
 
-    # ── Goals ──
+    # ── Goals (user-owned goals) ──
     active_goals = _safe_query(
         goals_db,
-        "SELECT title, priority, status FROM goals WHERE status IN ('active', 'in_progress') "
-        "ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END LIMIT 10"
+        "SELECT title, priority, status FROM user_goals WHERE status = 'active' "
+        "ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END LIMIT 10"
     )
     completed_today = _safe_count(
         goals_db,
-        "SELECT COUNT(*) FROM goals WHERE status = 'completed' AND updated_at >= ?",
+        "SELECT COUNT(*) FROM user_goals WHERE status = 'completed' AND completed_at >= ?",
         (today_str,)
     )
 

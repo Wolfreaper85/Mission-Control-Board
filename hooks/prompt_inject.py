@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 MAX_RULES = 10
 MAX_CAPSULES = 3
 MAX_STANDING_ORDERS = 5
+MAX_USER_GOALS = 5
 
 
 def _find_goals_db():
@@ -136,6 +137,28 @@ def prompt_inject(event):
                     conn.commit()
                 except Exception:
                     pass
+
+        # Inject active user goals
+        user_goals = _safe_query(
+            conn,
+            "SELECT title, description, priority, permanent FROM user_goals "
+            "WHERE scope IN (?, 'global') AND status = 'active' "
+            "ORDER BY permanent DESC, CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END "
+            "LIMIT ?",
+            (scope, MAX_USER_GOALS)
+        )
+        if user_goals:
+            goal_lines = []
+            for g in user_goals:
+                icon = {"high": "🔴", "medium": "🟠", "low": "🟢"}.get(g["priority"], "⚪")
+                perm = " [permanent]" if g.get("permanent") else ""
+                desc = f": {g['description'][:200]}" if g.get("description") else ""
+                goal_lines.append(f"  {icon} {g['title']}{perm}{desc}")
+            parts.append(
+                "[Your Goals]\n"
+                "The user has the following active goals. Execute when asked:\n"
+                + "\n".join(goal_lines)
+            )
 
         if parts:
             injection = "\n\n".join(parts)

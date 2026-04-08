@@ -33,6 +33,13 @@
         ],
         "settings": [
             {
+                "key": "show_apps_nav",
+                "type": "boolean",
+                "label": "Apps Launcher Nav Button",
+                "default": false,
+                "help": "Show the Apps launcher button in the navigation bar"
+            },
+            {
                 "key": "correction_detection",
                 "type": "boolean",
                 "label": "Correction Detection",
@@ -188,6 +195,11 @@
             },
             {
                 "method": "GET",
+                "path": "reflection/batch",
+                "handler": "routes/dashboard.py:get_reflection_batch"
+            },
+            {
+                "method": "GET",
                 "path": "corrections",
                 "handler": "routes/dashboard.py:get_corrections"
             },
@@ -295,6 +307,131 @@
                 "method": "GET",
                 "path": "calendar/reminders",
                 "handler": "routes/dashboard.py:check_calendar_reminders"
+            },
+            {
+                "method": "GET",
+                "path": "daily-plan",
+                "handler": "routes/dashboard.py:get_daily_plan"
+            },
+            {
+                "method": "POST",
+                "path": "daily-plan",
+                "handler": "routes/dashboard.py:save_daily_plan"
+            },
+            {
+                "method": "POST",
+                "path": "daily-plan/complete",
+                "handler": "routes/dashboard.py:complete_daily_plan"
+            },
+            {
+                "method": "GET",
+                "path": "daily-notes",
+                "handler": "routes/dashboard.py:get_daily_note"
+            },
+            {
+                "method": "POST",
+                "path": "daily-notes/save",
+                "handler": "routes/dashboard.py:save_daily_note"
+            },
+            {
+                "method": "POST",
+                "path": "daily-notes/delete",
+                "handler": "routes/dashboard.py:delete_daily_note"
+            },
+            {
+                "method": "GET",
+                "path": "xp/status",
+                "handler": "routes/dashboard.py:get_xp_status"
+            },
+            {
+                "method": "POST",
+                "path": "xp/award",
+                "handler": "routes/dashboard.py:award_xp"
+            },
+            {
+                "method": "GET",
+                "path": "xp/achievements",
+                "handler": "routes/dashboard.py:get_achievements"
+            },
+            {
+                "method": "GET",
+                "path": "habits",
+                "handler": "routes/dashboard.py:get_habits"
+            },
+            {
+                "method": "POST",
+                "path": "habits/create",
+                "handler": "routes/dashboard.py:create_habit"
+            },
+            {
+                "method": "POST",
+                "path": "habits/update",
+                "handler": "routes/dashboard.py:update_habit"
+            },
+            {
+                "method": "POST",
+                "path": "habits/toggle",
+                "handler": "routes/dashboard.py:toggle_habit"
+            },
+            {
+                "method": "GET",
+                "path": "habits/stats",
+                "handler": "routes/dashboard.py:get_habit_stats"
+            },
+            {
+                "method": "POST",
+                "path": "focus/start",
+                "handler": "routes/dashboard.py:start_focus"
+            },
+            {
+                "method": "POST",
+                "path": "focus/stop",
+                "handler": "routes/dashboard.py:stop_focus"
+            },
+            {
+                "method": "GET",
+                "path": "focus/stats",
+                "handler": "routes/dashboard.py:get_focus_stats"
+            },
+            {
+                "method": "GET",
+                "path": "pet/status",
+                "handler": "routes/dashboard.py:get_pet_status"
+            },
+            {
+                "method": "POST",
+                "path": "pet/interact",
+                "handler": "routes/dashboard.py:pet_interact"
+            },
+            {
+                "method": "POST",
+                "path": "feedback/thumbsdown",
+                "handler": "routes/dashboard.py:log_thumbsdown"
+            },
+            {
+                "method": "GET",
+                "path": "feedback/stats",
+                "handler": "routes/dashboard.py:get_feedback_stats"
+            },
+            {
+                "method": "GET",
+                "path": "user-goals",
+                "handler": "routes/dashboard.py:get_user_goals"
+            },
+            {
+                "method": "POST",
+                "path": "user-goals/create",
+                "handler": "routes/dashboard.py:create_user_goal"
+            },
+            {
+                "method": "POST",
+                "path": "user-goals/update",
+                "handler": "routes/dashboard.py:update_user_goal"
+            },
+            {
+                "method": "POST",
+                "path": "user-goals/delete",
+                "handler": "routes/dashboard.py:delete_user_goal"
             }
         ]
     }

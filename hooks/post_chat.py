@@ -218,10 +218,36 @@ def _detect_fake_tool_calls(response_text, scope="default"):
         logger.error(f"Self-Reflection: tool health bulletin error: {e}")
 
 
+def _award_chat_xp(scope):
+    """Award a small amount of XP for chatting — keeps the pet happy and rewards engagement."""
+    try:
+        from pathlib import Path
+        goals_db = None
+        for i in range(6):
+            candidate = Path(__file__).parents[i] / "user" / "goals.db"
+            if candidate.exists():
+                goals_db = candidate
+                break
+        if not goals_db:
+            return
+
+        conn = sqlite3.connect(str(goals_db), timeout=5)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute(
+            "INSERT INTO xp_log (action, xp_amount, details, scope) VALUES (?, ?, ?, ?)",
+            ("chat", 2, None, scope)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.debug(f"Chat XP award error: {e}")
+
+
 def post_chat(event):
     """
     After each exchange, check if reflection or capsule capture is warranted.
     Also monitors for fake tool calls (AI writing tools as text).
+    Awards small XP for chatting (keeps pet happy).
     Heavy work runs in a background thread to avoid blocking the response pipeline.
     """
     from core.plugin_loader import plugin_loader
@@ -233,16 +259,20 @@ def post_chat(event):
     user_input = event.input or ""
     response_text = event.response or ""
 
+    # ── Get scope early — used by tool health, XP, reflection ──
+    scope = "default"
+    system = event.metadata.get("system")
+    if system and hasattr(system, "llm_chat") and system.llm_chat:
+        try:
+            scope = system.llm_chat.session_manager.current_settings.get("memory_scope", "default")
+        except Exception:
+            pass
+
+    # ── Chat XP — always award for every exchange ──
+    threading.Thread(target=_award_chat_xp, args=(scope,), daemon=True).start()
+
     # ── Tool health check — always runs, lightweight regex scan ──
     if response_text and len(response_text) > 20:
-        # Get scope
-        scope = "default"
-        system = event.metadata.get("system")
-        if system and hasattr(system, "llm_chat") and system.llm_chat:
-            try:
-                scope = system.llm_chat.session_manager.current_settings.get("memory_scope", "default")
-            except Exception:
-                pass
         _detect_fake_tool_calls(response_text, scope)
 
     if not reflection_enabled and not capsules_enabled:
@@ -251,15 +281,6 @@ def post_chat(event):
     # Skip trivial exchanges
     if len(user_input.split()) < 5 and len(response_text.split()) < 10:
         return
-
-    # Get scope (reuse if already set above)
-    scope = "default"
-    system = event.metadata.get("system")
-    if system and hasattr(system, "llm_chat") and system.llm_chat:
-        try:
-            scope = system.llm_chat.session_manager.current_settings.get("memory_scope", "default")
-        except Exception:
-            pass
 
     plugin = _load_plugin_module()
 
