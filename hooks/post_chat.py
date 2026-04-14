@@ -130,14 +130,21 @@ Rules:
         # Strip thinking tags
         response_clean = re.sub(r'<think>.*?</think>', '', response.strip(), flags=re.DOTALL)
 
-        # Extract JSON
+        # Extract JSON — use raw_decode to handle extra text after the JSON object
         start = response_clean.find("{")
-        end = response_clean.rfind("}") + 1
-        if start == -1 or end == 0:
+        if start == -1:
             return
 
         import json
-        data = json.loads(response_clean[start:end])
+        try:
+            decoder = json.JSONDecoder()
+            data, _ = decoder.raw_decode(response_clean, start)
+        except json.JSONDecodeError:
+            # Fallback: try first { to last } extraction
+            end = response_clean.rfind("}") + 1
+            if end == 0:
+                return
+            data = json.loads(response_clean[start:end])
 
         plugin.save_reflection(
             task_context=user_input[:500],
