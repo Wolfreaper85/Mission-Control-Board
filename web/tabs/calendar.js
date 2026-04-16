@@ -994,7 +994,7 @@ function _showDayDetail(dateStr, allEvents, highlightId = null) {
                 ${dayEvents.map(ev => {
                     const color = ev.color || '#4a9eff';
                     const catIcon = _calCatIcon(ev.category || ev._source || 'event');
-                    const time = ev.start_time ? `\u{1F552} ${ev.start_time}` : '';
+                    const time = ev.start_time ? `\u{1F552} ${to12h(ev.start_time)}` : '';
                     const sourceLabel = { goal: 'Goal', goal_completed: 'Completed', note: 'Note', custom: '' };
                     const source = ev._source && ev._source !== 'custom' ? `<span class="mc-day-detail-source">${sourceLabel[ev._source] || esc(ev._source)}</span>` : '';
                     const isHighlighted = highlightId && String(ev.id) === highlightId;
@@ -1187,7 +1187,7 @@ function _renderPlannerSchedule(data) {
     }
 
     html += '<div class="mc-planner-hours">';
-    for (let h = 6; h <= 22; h++) {
+    for (let h = 0; h <= 23; h++) {
         const ampm = h < 12 ? 'AM' : 'PM';
         const hr12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
         const label = `${hr12}:00 ${ampm}`;
@@ -1271,12 +1271,28 @@ function _renderPlannerSchedule(data) {
             } catch (err) { console.error('[MC] Event delete failed:', err); }
         });
     });
+
+    // Auto-scroll the 24-hour grid to a useful starting position so the user
+    // doesn't open the planner scrolled to midnight with nothing visible.
+    // Priority: current hour (if today) > first event row > 8 AM default.
+    requestAnimationFrame(() => {
+        const scroller = el.closest('.mc-planner-body') || el;
+        let target = el.querySelector('.mc-planner-hour-now');
+        if (!target) {
+            const firstWithEvents = Array.from(el.querySelectorAll('.mc-planner-hour-row'))
+                .find(r => r.querySelector('.mc-planner-hour-events')?.children.length > 0);
+            target = firstWithEvents || el.querySelectorAll('.mc-planner-hour-row')[8];  // 8 AM default
+        }
+        if (target && scroller) {
+            scroller.scrollTop = Math.max(0, target.offsetTop - 40);
+        }
+    });
 }
 
 function _plannerEventChip(ev) {
     const color = ev.color || '#4a9eff';
     const catIcon = _calCatIcon(ev.category || ev._source || 'event');
-    const time = ev.start_time ? `<span class="mc-planner-evt-time">${ev.start_time}</span>` : '';
+    const time = ev.start_time ? `<span class="mc-planner-evt-time">${to12h(ev.start_time)}</span>` : '';
     const isCustom = ev._source === 'custom' && ev.id;
     const editAttr = isCustom ? `data-planner-edit="${ev.id}"` : '';
     const desc = ev.description ? `<div class="mc-planner-evt-desc">${esc(ev.description).substring(0, 80)}</div>` : '';

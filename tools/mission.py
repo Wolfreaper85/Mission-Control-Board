@@ -18,6 +18,27 @@ def _resolve_scope(arguments):
     return arguments.get("scope") or _get_active_scope()
 
 
+def _get_active_memory_scope():
+    """Get the active persona's memory scope from ContextVar — used to align
+    calendar tool writes with what the Mission Control UI displays, since the
+    calendar UI filters by memory_scope (via _mc.selectedScope)."""
+    try:
+        from core.chat.function_manager import scope_memory
+        return scope_memory.get()
+    except Exception:
+        return 'default'
+
+
+def _resolve_calendar_scope(arguments):
+    """Resolve the scope used for calendar events.
+
+    The Mission Control calendar UI filters events by `_mc.selectedScope`,
+    which is driven by the persona's `memory_scope` setting. To keep the
+    tool-created events visible in the UI, align on the same scope source.
+    """
+    return arguments.get("scope") or _get_active_memory_scope()
+
+
 def _find_goals_db():
     """Find goals.db regardless of whether we run from plugins/ or user/plugins/."""
     for i in range(6):
@@ -1373,7 +1394,7 @@ def _create_event(arguments, config):
     color = arguments.get("color", "#4a9eff")
     reminder_minutes = arguments.get("reminder_minutes")
     recurrence = arguments.get("recurrence")
-    scope = _resolve_scope(arguments)
+    scope = _resolve_calendar_scope(arguments)
     all_day = 0 if start_time else 1
 
     goals_db = _find_goals_db()
