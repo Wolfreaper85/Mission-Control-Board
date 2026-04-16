@@ -553,15 +553,15 @@ function _renderFullCalendar() {
 
     grid.querySelectorAll('.mc-fullcal-cell[data-date]').forEach(cell => {
         cell.addEventListener('click', (e) => {
-            // Don't open planner if we just finished a drag
-            if (e.target.closest('.mc-fullcal-event[draggable]')) return;
             _showDailyPlanner(cell.dataset.date);
         });
     });
 
     // ── Drag & Drop for calendar events ──
+    let _wasDragging = false;
     grid.querySelectorAll('.mc-fullcal-event[data-drag-id]').forEach(chip => {
         chip.addEventListener('dragstart', (e) => {
+            _wasDragging = true;
             e.stopPropagation();
             const eid = chip.dataset.dragId;
             e.dataTransfer.setData('text/plain', eid);
@@ -574,9 +574,16 @@ function _renderFullCalendar() {
         chip.addEventListener('dragend', () => {
             chip.classList.remove('mc-fullcal-dragging');
             grid.querySelectorAll('.mc-fullcal-drop-target').forEach(c => c.classList.remove('mc-fullcal-drop-target'));
+            // Reset drag flag after a short delay so the click handler can check it
+            setTimeout(() => { _wasDragging = false; }, 100);
         });
-        // Prevent the cell click from firing after drag
-        chip.addEventListener('click', (e) => e.stopPropagation());
+        // Clicking an event chip opens the planner for that day (unless we just dragged)
+        chip.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (_wasDragging) return;
+            const cell = chip.closest('.mc-fullcal-cell[data-date]');
+            if (cell) _showDailyPlanner(cell.dataset.date);
+        });
     });
 
     grid.querySelectorAll('.mc-fullcal-cell[data-date]').forEach(cell => {
@@ -1046,8 +1053,9 @@ let _plannerNoteTimer = null;
 
 function _showDailyPlanner(dateStr) {
     _plannerDate = dateStr;
-    // Remove any existing
+    // Remove any existing planner (tracked reference + orphan safety)
     _plannerEl?.remove();
+    document.getElementById('mc-planner-overlay')?.remove();
 
     const popup = document.createElement('div');
     popup.id = 'mc-planner-overlay';
@@ -1573,7 +1581,10 @@ let _editingRecurrence = null;  // Stored recurrence info for the event being ed
 let _editingEventDate = null;   // Date of the specific occurrence being edited
 
 function _showEventModal(event = null, date = null) {
+    // Safety: ensure no planner overlay is blocking the modal
+    _closePlanner();
     const modal = document.getElementById('mc-event-modal');
+    if (!modal) { console.error('[MC] Event modal element not found'); return; }
     const titleInput = document.getElementById('mc-event-title');
     const descInput = document.getElementById('mc-event-desc');
     const startInput = document.getElementById('mc-event-start');
