@@ -1,6 +1,6 @@
 # Sapphire Mission Control
 
-Visual command center plugin for [Sapphire AI](https://github.com/Wolfreaper85). The dashboard hub where you manage goals, plan your day, run focus sessions, watch your AI's self-reflection engine work, browse a calendar, and feed a 16-bit pixel pet — all from one place.
+Visual command center plugin for [Sapphire AI](https://gitlab.com/Wolfreaper85). The dashboard hub where you manage goals, plan your day, run focus sessions, watch your AI's self-reflection engine work, browse a calendar, and feed a 16-bit pixel pet — all from one place.
 
 Mission Control is one of the larger Sapphire plugins because it pulls a lot of "everyday workflow" features into a single tab. You can use as much or as little of it as you want; everything is opt-in via settings.
 
@@ -42,9 +42,9 @@ For the optional Discord Health Digest, configure the `digest_channel` setting (
 
 ## Requirements
 
-- [Sapphire AI](https://github.com/Wolfreaper85) v2.5+
-- (Optional) [Sapphire-Discord](https://github.com/Wolfreaper85) for Health Digest posting
-- (Optional) [MemPalace](https://github.com/Wolfreaper85) — Mission Control's reflection engine reads memory stats from MemPalace if installed
+- [Sapphire AI](https://gitlab.com/Wolfreaper85) v2.5+
+- (Optional) [Sapphire-Discord](https://gitlab.com/Wolfreaper85) for Health Digest posting
+- (Optional) [MemPalace](https://gitlab.com/Wolfreaper85) — Mission Control's reflection engine reads memory stats from MemPalace if installed
 
 ## Settings (all opt-in / opt-out)
 
@@ -119,4 +119,4 @@ MIT
 
 ## Author
 
-Built by [Wolfreaper85](https://github.com/Wolfreaper85) with help from Claude. Pixel art and workshop scenes hand-crafted.
+Built by [Wolfreaper85](https://gitlab.com/Wolfreaper85) with help from Claude. Pixel art and workshop scenes hand-crafted.
